@@ -117,6 +117,7 @@ export function useContractActions() {
           args:         args as never,
         })
         const receipt = await waitForTransactionReceipt(pub, { hash })
+        store.addTx(fnName as string, hash, receipt.gasUsed)
         store.addLog('ok', `${fnName} | tx: ${hash.slice(0, 14)}… | gas: ${receipt.gasUsed}`)
         await refreshWalletBalances(coreAddr)
         return { hash, gas: receipt.gasUsed }
@@ -142,6 +143,7 @@ export function useContractActions() {
           args:         [coreAddr, toTokenAmount(human, decimals)],
         })
         await waitForTransactionReceipt(pub, { hash })
+        store.addTx('ERC20.approve', hash)
         store.addLog('ok', `ERC20.approve ${human} tokens | tx: ${hash.slice(0, 14)}…`)
         await refreshWalletBalances(coreAddr)
         return hash

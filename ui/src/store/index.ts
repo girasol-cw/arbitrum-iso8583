@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
 import { ARBITRUM_SEPOLIA_RPC, DEPLOYED } from '../lib/contracts'
 
 export type LogLevel = 'info' | 'ok' | 'error'
@@ -11,6 +11,14 @@ export interface LogEntry {
   msg:   string
 }
 
+export interface TxEntry {
+  id:     number
+  ts:     string
+  action: string
+  hash:   Hex
+  gas?:   bigint
+}
+
 export interface TokenInfo {
   symbol:   string
   address:  Address
@@ -18,26 +26,17 @@ export interface TokenInfo {
 }
 
 interface AppState {
-  // Config
   rpcUrl:       string
   coreAddress:  Address | ''
   tokens:       TokenInfo[]
   isConnected:  boolean
-
-  // Active wallet
   activeWalletIdx: number
-
-  // Chain state
-  blockNumber: bigint
-  isPaused:    boolean
-
-  // Logs
-  logs: LogEntry[]
-
-  // Token balances for active wallet (wallet balance, not contract balance)
+  blockNumber:  bigint
+  isPaused:     boolean
+  logs:         LogEntry[]
+  txHistory:    TxEntry[]
   walletBalances: Record<string, bigint>
 
-  // Actions
   setRpcUrl:       (url: string) => void
   setCoreAddress:  (addr: Address) => void
   setTokens:       (tokens: TokenInfo[]) => void
@@ -47,6 +46,7 @@ interface AppState {
   setIsPaused:     (v: boolean) => void
   setWalletBalance:(sym: string, amount: bigint) => void
   addLog:          (level: LogLevel, msg: string) => void
+  addTx:           (action: string, hash: Hex, gas?: bigint) => void
   clearLogs:       () => void
 }
 
@@ -61,6 +61,7 @@ export const useAppStore = create<AppState>((set) => ({
   blockNumber:     0n,
   isPaused:        false,
   logs:            [],
+  txHistory:       [],
   walletBalances:  {},
 
   setRpcUrl:       (url)   => set({ rpcUrl: url }),
@@ -76,13 +77,15 @@ export const useAppStore = create<AppState>((set) => ({
     set(s => ({
       logs: [
         ...s.logs,
-        {
-          id:    ++logId,
-          level,
-          ts:    new Date().toLocaleTimeString(),
-          msg,
-        },
+        { id: ++logId, level, ts: new Date().toLocaleTimeString(), msg },
       ].slice(-200),
     })),
-  clearLogs: () => set({ logs: [] }),
+  addTx: (action, hash, gas) =>
+    set(s => ({
+      txHistory: [
+        { id: ++logId, ts: new Date().toLocaleTimeString(), action, hash, gas },
+        ...s.txHistory,
+      ].slice(0, 100),
+    })),
+  clearLogs: () => set({ logs: [], txHistory: [] }),
 }))
