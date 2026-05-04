@@ -21,8 +21,8 @@ export function PaymentsPanel() {
 
   // Authorize
   const [txId,     setTxId]    = useState('')
-  const [user,     setUser]    = useState(TEST_ACCOUNTS[0].address)
-  const [merchant, setMerchant]= useState(TEST_ACCOUNTS[0].address)
+  const [user,     setUser]    = useState<Address>(TEST_ACCOUNTS[0].address)
+  const [merchant, setMerchant]= useState<Address>(TEST_ACCOUNTS[0].address)
   const [authToken,setAuthToken]= useState('')
   const [amount,   setAmount]  = useState('10')
   const [expiresIn,setExpiresIn]= useState('3600')
@@ -101,7 +101,7 @@ export function PaymentsPanel() {
               <label className="label">User (payer)</label>
               <input
                 value={user}
-                onChange={e => setUser(e.target.value)}
+                onChange={e => setUser(e.target.value as Address)}
                 className="font-mono"
                 placeholder="0x…"
               />
@@ -110,7 +110,7 @@ export function PaymentsPanel() {
               <label className="label">Merchant (receiver)</label>
               <input
                 value={merchant}
-                onChange={e => setMerchant(e.target.value)}
+                onChange={e => setMerchant(e.target.value as Address)}
                 className="font-mono"
                 placeholder="0x…"
               />

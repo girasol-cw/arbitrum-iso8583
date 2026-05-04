@@ -113,7 +113,7 @@ export function useContractActions() {
         const hash = await writeContract(wc, {
           address:      coreAddr,
           abi:          SETTLEMENT_ABI,
-          functionName: fnName as string,
+          functionName: fnName as never,
           args:         args as never,
         })
         const receipt = await waitForTransactionReceipt(pub, { hash })

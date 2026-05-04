@@ -11,8 +11,8 @@ interface HoldResult {
   merchant:  Address
   token:     Address
   amount:    bigint
-  createdAt: bigint
-  expiresAt: bigint
+  createdAt: bigint | number
+  expiresAt: bigint | number
   status:    number
 }
 
@@ -21,7 +21,7 @@ export function QueryPanel() {
   const { queryBalance, queryHold } = useContractActions()
 
   // Balance query
-  const [balUser,   setBalUser]   = useState(TEST_ACCOUNTS[0].address)
+  const [balUser,   setBalUser]   = useState<string>(TEST_ACCOUNTS[0].address)
   const [balToken,  setBalToken]  = useState('')
   const [balResult, setBalResult] = useState<{ available: bigint; locked: bigint } | null>(null)
   const [balErr,    setBalErr]    = useState('')
@@ -45,7 +45,7 @@ export function QueryPanel() {
     if (!holdId.trim()) return
     setHoldResult(null); setHoldErr('')
     const res = await queryHold(holdId.trim() as Hex)
-    if (res) setHoldResult(res as HoldResult)
+    if (res) setHoldResult(res as unknown as HoldResult)
     else setHoldErr('Query failed — check Activity Feed')
   }
 
@@ -71,7 +71,7 @@ export function QueryPanel() {
               <label className="label">Address</label>
               <input
                 value={balUser}
-                onChange={e => setBalUser(e.target.value)}
+                onChange={e => setBalUser(e.target.value as Address)}
                 className="font-mono"
                 placeholder="0x…"
               />

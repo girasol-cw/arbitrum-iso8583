@@ -47,7 +47,7 @@ export function ConnectBar() {
         <span className="text-[11px] text-slate-500 whitespace-nowrap">Core</span>
         <input
           value={localCore}
-          onChange={e => setLocalCore(e.target.value)}
+          onChange={e => setLocalCore(e.target.value as Address)}
           className="w-52 font-mono"
           placeholder="0x…"
         />
@@ -58,7 +58,7 @@ export function ConnectBar() {
         <span className="text-[11px] text-slate-500">USDC</span>
         <input
           value={localUsdc}
-          onChange={e => setLocalUsdc(e.target.value)}
+          onChange={e => setLocalUsdc(e.target.value as Address)}
           className="w-52 font-mono"
           placeholder="0x…"
         />
@@ -69,7 +69,7 @@ export function ConnectBar() {
         <span className="text-[11px] text-slate-500">WETH</span>
         <input
           value={localWeth}
-          onChange={e => setLocalWeth(e.target.value)}
+          onChange={e => setLocalWeth(e.target.value as Address)}
           className="w-52 font-mono"
           placeholder="0x…"
         />
