@@ -2,12 +2,13 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  privateKeyToAccount,
 } from 'viem'
-import { anvil } from 'viem/chains'
+import { privateKeyToAccount } from 'viem/accounts'
+import { arbitrumSepolia } from 'viem/chains'
 import type { Hex } from 'viem'
+import { ARBITRUM_SEPOLIA_RPC } from './contracts'
 
-let _rpcUrl = 'http://127.0.0.1:8545'
+let _rpcUrl = ARBITRUM_SEPOLIA_RPC
 
 export function setRpcUrl(url: string) {
   _rpcUrl = url
@@ -15,7 +16,7 @@ export function setRpcUrl(url: string) {
 
 export function getPublicClient() {
   return createPublicClient({
-    chain: anvil,
+    chain: arbitrumSepolia,
     transport: http(_rpcUrl),
   })
 }
@@ -24,7 +25,7 @@ export function getWalletClient(pk: Hex) {
   const account = privateKeyToAccount(pk)
   return createWalletClient({
     account,
-    chain: anvil,
+    chain: arbitrumSepolia,
     transport: http(_rpcUrl),
   })
 }

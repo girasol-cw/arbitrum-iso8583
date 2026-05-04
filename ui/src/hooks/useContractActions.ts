@@ -5,9 +5,8 @@ import {
   waitForTransactionReceipt,
   getBalance,
   getBlockNumber,
-  keccak256,
-  toHex,
 } from 'viem/actions'
+import { keccak256, toHex } from 'viem'
 import type { Address, Hex } from 'viem'
 
 import { getPublicClient, getWalletClient, setRpcUrl } from '../lib/viemClient'

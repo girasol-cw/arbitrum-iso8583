@@ -4,6 +4,7 @@ import { useAppStore } from '../store'
 import { useContractActions } from '../hooks/useContractActions'
 import { TEST_ACCOUNTS } from '../lib/accounts'
 import { shortenAddress } from '../lib/utils'
+import { DEPLOYED } from '../lib/contracts'
 
 export function ConnectBar() {
   const { rpcUrl, coreAddress, blockNumber, isConnected, activeWalletIdx } = useAppStore()
@@ -11,9 +12,9 @@ export function ConnectBar() {
   const { connect } = useContractActions()
 
   const [localRpc,  setLocalRpc]  = useState(rpcUrl)
-  const [localCore, setLocalCore] = useState(coreAddress)
-  const [localUsdc, setLocalUsdc] = useState('')
-  const [localWeth, setLocalWeth] = useState('')
+  const [localCore, setLocalCore] = useState(coreAddress || DEPLOYED.proxy)
+  const [localUsdc, setLocalUsdc] = useState(DEPLOYED.usdc)
+  const [localWeth, setLocalWeth] = useState(DEPLOYED.weth)
   const [loading,   setLoading]   = useState(false)
 
   const handleConnect = async () => {

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Address } from 'viem'
+import { ARBITRUM_SEPOLIA_RPC, DEPLOYED } from '../lib/contracts'
 
 export type LogLevel = 'info' | 'ok' | 'error'
 
@@ -52,8 +53,8 @@ interface AppState {
 let logId = 0
 
 export const useAppStore = create<AppState>((set) => ({
-  rpcUrl:          'http://127.0.0.1:8545',
-  coreAddress:     '',
+  rpcUrl:          ARBITRUM_SEPOLIA_RPC,
+  coreAddress:     DEPLOYED.proxy,
   tokens:          [],
   isConnected:     false,
   activeWalletIdx: 0,
