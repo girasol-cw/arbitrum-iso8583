@@ -40,3 +40,4 @@ error HoldExpired(bytes32 txId, uint256 expiresAt);
 error HoldNotExpired(bytes32 txId, uint256 expiresAt);
 error ExpiresAtInPast(uint256 expiresAt, uint256 blockTimestamp);
 error BatchTooLarge(uint256 provided, uint256 maxAllowed);
+error FeeOnTransferToken(address token, uint256 expected, uint256 received);

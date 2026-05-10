@@ -32,7 +32,8 @@ import {
     HoldExpired,
     HoldNotExpired,
     ExpiresAtInPast,
-    BatchTooLarge
+    BatchTooLarge,
+    FeeOnTransferToken
 } from "./interfaces/ISettlementTypes.sol";
 
 contract ArbitrumSettlementCore is
@@ -130,17 +131,32 @@ contract ArbitrumSettlementCore is
     ) external nonReentrant whenNotPaused requireTokenAllowed(token) {
         require(amount != 0, ZeroAmount());
 
+        // Fee-on-transfer guard: measure the actual balance delta and revert if
+        // the contract received less than `amount`. This prevents the internal
+        // ledger from crediting more tokens than the contract actually holds,
+        // which would cause insolvency. Fee-on-transfer tokens are not supported.
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        require(received == amount, FeeOnTransferToken(token, amount, received));
 
         _getStorage().balances[msg.sender][token].available += amount;
 
         emit Deposited(msg.sender, token, amount);
     }
 
+    /**
+     * @notice Withdraws available balance for a given token.
+     * @dev Intentionally does NOT require the token to be currently allowed. This ensures users
+     *      can always recover funds even if a token is later disabled via `configureToken`.
+     *      The system must never trap user funds behind an admin gate.
+     * @param token ERC-20 token address.
+     * @param amount Amount to withdraw. Must be <= available balance.
+     */
     function withdraw(
         address token,
         uint256 amount
-    ) external nonReentrant whenNotPaused requireTokenAllowed(token) {
+    ) external nonReentrant whenNotPaused {
         require(amount != 0, ZeroAmount());
 
         uint256 available = _getStorage().balances[msg.sender][token].available;
@@ -156,6 +172,22 @@ contract ArbitrumSettlementCore is
     // Authorize / Capture / Release / Expire
     // -------------------------------------------------------------------------
 
+    /**
+     * @notice Creates an authorized hold, locking `amount` from `user`'s available balance.
+     * @dev Only callable by the RELAYER_ROLE. The relayer is responsible for all off-chain
+     *      business logic prior to calling this function, including:
+     *      - KYC / AML checks
+     *      - Per-user and per-merchant spending limits
+     *      - Daily / velocity limits
+     *      - Fraud scoring
+     *      On-chain, the contract only enforces that the user has sufficient available balance.
+     * @param txId       Unique identifier for this payment (must not have been used before).
+     * @param user       Address whose funds are being held.
+     * @param merchant   Address that will receive funds upon capture.
+     * @param token      ERC-20 token to use.
+     * @param amount     Amount to lock. Must be > 0 and <= user's available balance.
+     * @param expiresAt  Unix timestamp after which capture is no longer valid.
+     */
     function authorize(
         bytes32 txId,
         address user,
@@ -191,6 +223,22 @@ contract ArbitrumSettlementCore is
         emit PaymentAuthorized(txId, user, merchant, token, amount, expiresAt);
     }
 
+    /**
+     * @notice Captures a hold, immediately transferring funds to the merchant.
+     * @dev This is a FINAL settlement — not a contable capture phase. The token transfer
+     *      to the merchant is atomic with the state change: if the transfer fails, the
+     *      entire transaction reverts and the hold remains AUTHORIZED.
+     *
+     *      Scope limitations (by design for M1):
+     *      - No partial capture: the full hold amount is always captured.
+     *      - No incremental capture: a hold can only be captured once.
+     *      - No overcapture / tip adjustment: amount is fixed at authorize time.
+     *      - No reversals or refunds: once captured, funds are with the merchant.
+     *
+     *      If future clearing/netting is required, a separate settlement layer
+     *      must be introduced; this contract is not designed for that.
+     * @param txId Unique identifier of the hold to capture. Must be AUTHORIZED and not expired.
+     */
     function capture(
         bytes32 txId
     ) external onlyRole(RELAYER_ROLE) whenNotPaused nonReentrant requireAuthorized(txId) {
@@ -211,9 +259,22 @@ contract ArbitrumSettlementCore is
         emit PaymentCaptured(txId, user, merchant, token, amount);
     }
 
+    /**
+     * @notice Releases a hold, returning locked funds to the user's available balance.
+     * @dev Only callable while the hold is AUTHORIZED and NOT yet expired. Once a hold
+     *      has passed its `expiresAt` timestamp, only `expire` (or `batchExpire`) can
+     *      free the funds — release is intentionally blocked to avoid ambiguity between
+     *      the two release paths and to enforce a clear state machine:
+     *
+     *          AUTHORIZED + not expired → release  (relayer-initiated)
+     *          AUTHORIZED + expired     → expire   (permissionless)
+     *
+     * @param txId Unique identifier of the hold to release. Must be AUTHORIZED and not expired.
+     */
     function release(bytes32 txId) external whenNotPaused nonReentrant requireReleaserRole requireAuthorized(txId) {
         ArbitrumSettlementCoreStorage storage $ = _getStorage();
         Hold storage hold = $.holds[txId];
+        require(block.timestamp <= hold.expiresAt, HoldExpired(txId, hold.expiresAt));
 
         address user   = hold.user;
         address token  = hold.token;
@@ -226,10 +287,26 @@ contract ArbitrumSettlementCore is
         emit PaymentReleased(txId, user, hold.merchant, token, amount);
     }
 
+    /**
+     * @notice Expires a single hold that has passed its `expiresAt` timestamp,
+     *         returning locked funds to the user's available balance.
+     * @dev Intentionally omits `whenNotPaused`. This is by design: even when the system
+     *      is paused (e.g. during an incident or upgrade), users must always be able to
+     *      recover funds from expired holds. Pause semantics here mean "block new business
+     *      operations", not "freeze all state mutations".
+     * @param txId Unique identifier of the hold to expire.
+     */
     function expire(bytes32 txId) external nonReentrant {
         _expireSingle(txId);
     }
 
+    /**
+     * @notice Expires multiple holds in a single transaction.
+     * @dev Same pause semantics as `expire`: intentionally omits `whenNotPaused` to
+     *      guarantee fund recovery is always available, regardless of system state.
+     *      Limited to {MAX_BATCH_EXPIRE} entries per call to bound gas consumption.
+     * @param txIds Array of hold identifiers to expire. Max length: {MAX_BATCH_EXPIRE}.
+     */
     function batchExpire(bytes32[] calldata txIds) external nonReentrant {
         uint256 len = txIds.length;
         require(len <= MAX_BATCH_EXPIRE, BatchTooLarge(len, MAX_BATCH_EXPIRE));

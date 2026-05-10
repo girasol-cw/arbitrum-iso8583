@@ -5,6 +5,7 @@ import {
   waitForTransactionReceipt,
   getBalance,
   getBlockNumber,
+  getTransactionCount,
 } from 'viem/actions'
 import { keccak256, toHex } from 'viem'
 import type { Address, Hex } from 'viem'
@@ -110,15 +111,34 @@ export function useContractActions() {
       try {
         const pub  = getPublicClient()
         const wc   = walletClient()
+
+        const t0 = performance.now()
         const hash = await writeContract(wc, {
           address:      coreAddr,
           abi:          SETTLEMENT_ABI,
           functionName: fnName as never,
           args:         args as never,
         })
+        const t1 = performance.now()
+
         const receipt = await waitForTransactionReceipt(pub, { hash })
+        const t2 = performance.now()
+
+        const submitMs  = Math.round(t1 - t0)
+        const confirmMs = Math.round(t2 - t1)
+        const totalMs   = Math.round(t2 - t0)
+
         store.addTx(fnName as string, hash, receipt.gasUsed)
-        store.addLog('ok', `${fnName} | tx: ${hash.slice(0, 14)}… | gas: ${receipt.gasUsed}`)
+        store.addBenchmark({
+          action:      fnName as string,
+          hash,
+          submitMs,
+          confirmMs,
+          totalMs,
+          gasUsed:     receipt.gasUsed,
+          blockNumber: receipt.blockNumber,
+        })
+        store.addLog('ok', `${fnName} | tx: ${hash.slice(0, 14)}… | gas: ${receipt.gasUsed} | ${totalMs}ms`)
         await refreshWalletBalances(coreAddr)
         return { hash, gas: receipt.gasUsed }
       } catch (err: unknown) {
@@ -159,6 +179,24 @@ export function useContractActions() {
   const configureToken = (token: Address, allowed: boolean) =>
     sendTx('configureToken', [token, allowed])
 
+  // ── resolveToken: read metadata without writing anything ──────────────────
+  const resolveToken = useCallback(
+    async (addr: Address) => {
+      try {
+        const pub = getPublicClient()
+        const [symbol, decimals] = await Promise.all([
+          readContract(pub, { address: addr, abi: ERC20_ABI, functionName: 'symbol' }),
+          readContract(pub, { address: addr, abi: ERC20_ABI, functionName: 'decimals' }),
+        ])
+        return { symbol: symbol as string, address: addr, decimals: Number(decimals) }
+      } catch (err) {
+        store.addLog('error', `resolveToken: ${extractError(err)}`)
+        return null
+      }
+    },
+    [],
+  )
+
   // ── grantRole / revokeRole ────────────────────────────────────────────────
   const grantRole = (roleName: string, account: Address) =>
     sendTx('grantRole', [roleHash(roleName), account])
@@ -192,6 +230,120 @@ export function useContractActions() {
   const release     = (txId: Hex) => sendTx('release', [txId])
   const expire      = (txId: Hex) => sendTx('expire',  [txId])
   const batchExpire = (txIds: Hex[]) => sendTx('batchExpire', [txIds])
+
+  // ── burstAuthorize: N authorizations with sequential nonces ───────────────
+  // Fires all writeContract calls immediately (no receipt wait), collecting
+  // hashes, then waits for all receipts in parallel. This avoids nonce
+  // collisions that occur when Promise.all fetches the same pending nonce N times.
+  const burstAuthorize = useCallback(
+    async (items: Array<{
+      txId:      Hex
+      user:      Address
+      merchant:  Address
+      token:     Address
+      human:     string
+      decimals:  number
+      expiresIn: number
+    }>) => {
+      const pub  = getPublicClient()
+      const wc   = walletClient()
+      const acct = wc.account
+
+      // Fetch pending nonce once — all txs will increment from here
+      const startNonce = await getTransactionCount(pub, {
+        address:   acct.address,
+        blockTag: 'pending',
+      })
+
+      // Phase A: submit all transactions without waiting for receipts
+      const submissions = await Promise.allSettled(
+        items.map(async (item, i) => {
+          const expiresAt = BigInt(Math.floor(Date.now() / 1000) + item.expiresIn)
+          const hash = await writeContract(wc, {
+            address:      coreAddr,
+            abi:          SETTLEMENT_ABI,
+            functionName: 'authorize' as never,
+            args:         [item.txId, item.user, item.merchant, item.token,
+                           toTokenAmount(item.human, item.decimals), expiresAt] as never,
+            nonce:        startNonce + i,
+          })
+          return { i, txId: item.txId, hash }
+        }),
+      )
+
+      // Phase B: wait for all submitted receipts in parallel
+      const results = await Promise.allSettled(
+        submissions.map(async s => {
+          if (s.status === 'rejected') throw s.reason
+          const { i, txId, hash } = s.value
+          const receipt = await waitForTransactionReceipt(pub, { hash })
+          return { i, txId, hash, gas: receipt.gasUsed, ok: receipt.status === 'success' }
+        }),
+      )
+
+      await refreshWalletBalances(coreAddr)
+
+      return results.map((r, i) => {
+        if (r.status === 'fulfilled' && r.value.ok) {
+          store.addTx('authorize', r.value.hash, r.value.gas)
+          return { i: r.value.i, txId: r.value.txId, hash: r.value.hash as Hex, ok: true }
+        }
+        const reason = r.status === 'rejected' ? extractError(r.reason) : 'reverted'
+        store.addLog('error', `burst authorize[${i}]: ${reason}`)
+        return { i: items[i] ? i : i, txId: items[i]?.txId ?? '0x' as Hex, hash: null, ok: false, reason }
+      })
+    },
+    [coreAddr, walletClient, refreshWalletBalances],
+  )
+
+  // ── burstCapture: N captures with sequential nonces ───────────────────────
+  const burstCapture = useCallback(
+    async (txIds: Hex[]) => {
+      const pub  = getPublicClient()
+      const wc   = walletClient()
+      const acct = wc.account
+
+      const startNonce = await getTransactionCount(pub, {
+        address:   acct.address,
+        blockTag: 'pending',
+      })
+
+      const submissions = await Promise.allSettled(
+        txIds.map(async (txId, i) => {
+          const hash = await writeContract(wc, {
+            address:      coreAddr,
+            abi:          SETTLEMENT_ABI,
+            functionName: 'capture' as never,
+            args:         [txId] as never,
+            nonce:        startNonce + i,
+          })
+          return { i, txId, hash }
+        }),
+      )
+
+      const results = await Promise.allSettled(
+        submissions.map(async s => {
+          if (s.status === 'rejected') throw s.reason
+          const { i, txId, hash } = s.value
+          const receipt = await waitForTransactionReceipt(pub, { hash })
+          return { i, txId, hash, gas: receipt.gasUsed, ok: receipt.status === 'success' }
+        }),
+      )
+
+      await refreshWalletBalances(coreAddr)
+
+      return results.map((r, i) => {
+        if (r.status === 'fulfilled' && r.value.ok) {
+          store.addTx('capture', r.value.hash, r.value.gas)
+          return { i: r.value.i, txId: r.value.txId, hash: r.value.hash as Hex, ok: true }
+        }
+        const reason = r.status === 'rejected' ? extractError(r.reason) : 'reverted'
+        store.addLog('error', `burst capture[${i}]: ${reason}`)
+        return { i, txId: txIds[i] ?? '0x' as Hex, hash: null, ok: false, reason }
+      })
+    },
+    [coreAddr, walletClient, refreshWalletBalances],
+  )
 
   // ── pause / unpause ───────────────────────────────────────────────────────
   const pause = async () => {
@@ -263,20 +415,38 @@ export function useContractActions() {
     [coreAddr],
   )
 
+  // ── measureRpcLatency ─────────────────────────────────────────────────────
+  const measureRpcLatency = useCallback(
+    async () => {
+      const pub = getPublicClient()
+      const t0 = performance.now()
+      await getBlockNumber(pub)
+      const ms = Math.round(performance.now() - t0)
+      store.setRpcLatency(ms)
+      store.addLog('info', `RPC latency: ${ms}ms`)
+      return ms
+    },
+    [],
+  )
+
   return {
     connect,
     refreshWalletBalances,
+    measureRpcLatency,
     approveToken,
     configureToken,
+    resolveToken,
     grantRole,
     revokeRole,
     deposit,
     withdraw,
     authorize,
+    burstAuthorize,
     capture,
     release,
     expire,
     batchExpire,
+    burstCapture,
     pause,
     unpause,
     queryBalance,

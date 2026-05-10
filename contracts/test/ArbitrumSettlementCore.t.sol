@@ -19,15 +19,16 @@ import {
     HoldExpired,
     HoldNotExpired,
     ExpiresAtInPast,
-    BatchTooLarge
+    BatchTooLarge,
+    FeeOnTransferToken
 } from "../src/interfaces/ISettlementTypes.sol";
 
 // =============================================================================
 // Auxiliary: malicious token for reentrancy tests
 // =============================================================================
 
-/// @dev ERC-20 que llama un payload arbitrario durante `transfer`.
-///      Verifica que los guards nonReentrant de ArbitrumSettlementCore actúan.
+/// @dev ERC-20 that invokes an arbitrary payload during `transfer`.
+///      Verifies that the nonReentrant guards in ArbitrumSettlementCore hold.
 contract ReentrantToken is MockERC20 {
     bytes  public attackPayload;
     address public attackTarget;
@@ -45,8 +46,8 @@ contract ReentrantToken is MockERC20 {
             bytes memory p = attackPayload;
             attackTarget   = address(0);
             attackPayload  = "";
-            // La llamada reentrante debe ser rechazada por nonReentrant; ignoramos
-            // el resultado deliberadamente.
+            // The reentrant call must be rejected by nonReentrant; we deliberately
+            // ignore the return value.
             (bool ok, ) = t.call(p);
             (ok);
         }
@@ -55,11 +56,39 @@ contract ReentrantToken is MockERC20 {
 }
 
 // =============================================================================
-// Auxiliary: handler para invariant tests de Foundry
+// Auxiliary: fee-on-transfer token for insolvency tests
 // =============================================================================
 
-/// @dev Conduce transiciones de estado aleatorias. Foundry llama a sus
-///      funciones públicas durante el fuzzing de invariantes.
+/// @dev ERC-20 that charges 1 unit of fee to the receiving contract on every
+///      transferFrom. Simulates deflationary tokens (e.g. STA, PAXG).
+///      Used to detect whether the contract credits more than it actually received,
+///      which would introduce latent insolvency.
+contract MockFeeOnTransferERC20 is MockERC20 {
+    uint256 public constant FEE = 1; // 1 unit (minimum 6-decimal token)
+
+    constructor() MockERC20("FeeUSD", "FUSD", 6) {}
+
+    /// @dev Burns FEE from the recipient's balance on every transferFrom.
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public override returns (bool) {
+        bool ok = super.transferFrom(from, to, amount);
+        // The destination contract "loses" FEE: we burn from `to`'s balance.
+        if (ok && balanceOf(to) >= FEE) {
+            _burn(to, FEE);
+        }
+        return ok;
+    }
+}
+
+// =============================================================================
+// Auxiliary: handler for Foundry invariant tests
+// =============================================================================
+
+/// @dev Drives random state transitions. Foundry calls its public functions
+///      during invariant fuzzing.
 contract SettlementHandler is Test {
     ArbitrumSettlementCore public core;
     MockERC20              public token;
@@ -84,7 +113,7 @@ contract SettlementHandler is Test {
         admin   = _admin;
     }
 
-    // --- helpers internos ---
+    // --- internal helpers ---
 
     function _nextUser(uint256 seed) internal view returns (address) {
         return users[seed % users.length];
@@ -94,11 +123,11 @@ contract SettlementHandler is Test {
         return keccak256(abi.encode("tx", nextTxSeed++));
     }
 
-    // --- acciones ---
+    // --- actions ---
 
     function addUser(uint256 seed) external {
         address u = address(uint160(uint256(keccak256(abi.encode("user", seed)))));
-        if (_registeredUser[u]) return; // evitar duplicados en el array
+        if (_registeredUser[u]) return; // skip duplicates
         _registeredUser[u] = true;
         token.mint(u, 10_000e6);
         users.push(u);
@@ -176,7 +205,7 @@ contract SettlementHandler is Test {
         core.expire(txId);
     }
 
-    // --- vistas para aserciones de invariante ---
+    // --- views for invariant assertions ---
 
     function totalLocked() external view returns (uint256 sum) {
         for (uint256 i; i < users.length; ++i) {
@@ -205,8 +234,9 @@ contract SettlementHandler is Test {
 }
 
 // =============================================================================
-// Tests unitarios
+// Unit tests
 // =============================================================================
+
 
 contract ArbitrumSettlementCoreTest is Test {
     ArbitrumSettlementCore core;
@@ -341,6 +371,44 @@ contract ArbitrumSettlementCoreTest is Test {
         assertEq(avail, 2 * AMOUNT);
     }
 
+    function test_deposit_rejectsFeeOnTransferToken() public {
+        // Arrange: configure a deflationary token and fund the user
+        MockFeeOnTransferERC20 feeToken = new MockFeeOnTransferERC20();
+        feeToken.mint(user, 1_000e6);
+
+        vm.prank(admin);
+        core.configureToken(address(feeToken), true);
+
+        // Act + Assert: deposit must revert with FeeOnTransferToken because
+        // the contract receives `amount - FEE` but is asked to credit `amount`
+        uint256 depositAmount = 100e6;
+        vm.startPrank(user);
+        feeToken.approve(address(core), depositAmount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FeeOnTransferToken.selector,   // error del contrato
+                address(feeToken),
+                depositAmount,                 // expected
+                depositAmount - feeToken.FEE() // received (actually transferred to contract)
+            )
+        );
+        core.deposit(address(feeToken), depositAmount);
+        vm.stopPrank();
+    }
+
+    function test_deposit_contractBalanceMatchesLedger() public {
+        // Verifies that after a normal deposit the contract's real token balance
+        // matches exactly what was credited in the internal ledger.
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        uint256 contractBalance = token.balanceOf(address(core));
+        (uint256 avail, ) = core.getBalance(user, address(token));
+        assertEq(contractBalance, avail, "contract balance must match ledger");
+    }
+
     // =========================================================================
     // Withdraw
     // =========================================================================
@@ -424,7 +492,7 @@ contract ArbitrumSettlementCoreTest is Test {
         vm.prank(relayer);
         core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
 
-        // Reponer fondos para que el balance no sea el impedimento
+        // Replenish funds so balance is not the blocker
         vm.startPrank(user);
         token.approve(address(core), AMOUNT);
         core.deposit(address(token), AMOUNT);
@@ -913,7 +981,7 @@ contract ArbitrumSettlementCoreTest is Test {
         vm.prank(relayer);
         core.authorize(TX1, user, merchant, address(rToken), AMOUNT, exp);
 
-        // El token reentra durante la transferencia de capture
+        // The token re-enters during the capture transfer
         rToken.setAttack(
             address(core),
             abi.encodeCall(IArbitrumSettlementCore.capture, (TX1))
@@ -922,7 +990,7 @@ contract ArbitrumSettlementCoreTest is Test {
         vm.prank(relayer);
         core.capture(TX1);
 
-        // El hold debe quedar en CAPTURED (no corrompido)
+        // The hold must remain CAPTURED (not corrupted)
         assertTrue(core.getHold(TX1).status == HoldStatus.CAPTURED);
     }
 
@@ -1087,7 +1155,7 @@ contract ArbitrumSettlementCoreTest is Test {
     // Fuzz tests
     // =========================================================================
 
-    /// @dev available + locked == deposited para cualquier monto válido.
+    /// @dev available + locked == deposited for any valid amount.
     function testFuzz_authorize_accountingNeverViolated(uint96 rawAmount) public {
         uint256 deposited = bound(rawAmount, 1, type(uint96).max);
         token.mint(user, deposited);
@@ -1102,11 +1170,11 @@ contract ArbitrumSettlementCoreTest is Test {
 
         (uint256 avail, uint256 locked) = core.getBalance(user, address(token));
         assertEq(avail + locked, deposited, "avail+locked != deposited");
-        assertEq(locked,         deposited, "todo debe estar bloqueado");
-        assertEq(avail,          0,         "nada debe estar disponible");
+        assertEq(locked,         deposited, "entire deposit must be locked");
+        assertEq(avail,          0,         "nothing must remain available");
     }
 
-    /// @dev Un txId duplicado siempre revierte, indiferente del valor del id.
+    /// @dev A duplicate txId always reverts, regardless of its value.
     function testFuzz_authorize_duplicateTxIdAlwaysReverts(bytes32 txId) public {
         token.mint(user, 2 * AMOUNT);
 
@@ -1124,7 +1192,7 @@ contract ArbitrumSettlementCoreTest is Test {
         core.authorize(txId, user, merchant, address(token), AMOUNT, exp);
     }
 
-    /// @dev Tras capture el merchant recibe exactamente el monto autorizado.
+    /// @dev After capture the merchant receives exactly the authorized amount.
     function testFuzz_capture_merchantReceivesExactAmount(
         uint96 rawDeposit,
         uint96 rawCapture
@@ -1152,7 +1220,7 @@ contract ArbitrumSettlementCoreTest is Test {
         assertEq(avail, deposited - captured);
     }
 
-    /// @dev El saldo del contrato nunca cae por debajo de los fondos internos.
+    /// @dev The contract balance never falls below its internal accounting.
     function testFuzz_contractSolvency(uint96 rawAmount) public {
         uint256 deposited = bound(rawAmount, 1, type(uint96).max);
         token.mint(user, deposited);
@@ -1166,8 +1234,389 @@ contract ArbitrumSettlementCoreTest is Test {
         assertGe(
             token.balanceOf(address(core)),
             avail + locked,
-            "contrato insolvente tras deposito"
+            "contract is insolvent after deposit"
         );
+    }
+
+    // =========================================================================
+    // CRITICAL 1 — withdraw after token is disabled
+    // =========================================================================
+
+    /// @dev When the admin disables a token (configureToken false) a user who
+    ///      already had a deposited balance MUST still be able to withdraw their
+    ///      funds. Access to one's own funds must never be gated by an admin
+    ///      decision. Mirrors the NatSpec comment on withdraw().
+    function test_withdraw_afterTokenDisabled_succeedsForExistingBalance() public {
+        // --- setup: deposit while the token is enabled ---
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        // --- admin disables the token ---
+        vm.prank(admin);
+        core.configureToken(address(token), false);
+        assertFalse(core.getTokenConfig(address(token)).allowed, "token must be disabled");
+
+        // --- user must be able to withdraw despite the disable ---
+        uint256 preBalance = token.balanceOf(user);
+        vm.prank(user);
+        core.withdraw(address(token), AMOUNT);
+
+        (uint256 avail, ) = core.getBalance(user, address(token));
+        assertEq(avail, 0, "avail must be zero after withdraw");
+        assertEq(token.balanceOf(user), preBalance + AMOUNT, "user must recover their tokens");
+    }
+
+    /// @dev A new deposit with a disabled token must still revert.
+    function test_deposit_withDisabledToken_reverts() public {
+        vm.prank(admin);
+        core.configureToken(address(token), false);
+
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        vm.expectRevert(abi.encodeWithSelector(TokenNotAllowed.selector, address(token)));
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+    }
+
+    // =========================================================================
+    // CRITICAL 2 — release after expiration
+    // =========================================================================
+
+    /// @dev The contract enforces a clear state machine:
+    ///      AUTHORIZED + not expired → release  (relayer)
+    ///      AUTHORIZED + expired     → expire   (permissionless)
+    ///      Calling release on an already-expired hold MUST revert with HoldExpired
+    ///      to avoid ambiguity between the two fund-release paths.
+    function test_release_afterExpiration_reverts() public {
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
+
+        // Advance past expiresAt
+        vm.warp(expiresAt + 1);
+
+        vm.prank(relayer);
+        vm.expectRevert(abi.encodeWithSelector(HoldExpired.selector, TX1, expiresAt));
+        core.release(TX1);
+
+        // Funds are still locked; expire correctly frees them
+        (, uint256 locked) = core.getBalance(user, address(token));
+        assertEq(locked, AMOUNT, "funds must remain locked until expire");
+
+        core.expire(TX1);
+        (, locked) = core.getBalance(user, address(token));
+        assertEq(locked, 0, "expire must release the funds");
+    }
+
+    // =========================================================================
+    // CRITICAL 3 — batchExpire with an invalid ID in the middle of the batch
+    // =========================================================================
+
+    /// @dev If a txId inside the batch does not exist (status NONE), _expireSingle
+    ///      reverts with HoldNotFound. Because the entire call is atomic, the whole
+    ///      batch reverts. This test documents and validates that behaviour.
+    function test_batchExpire_invalidIdInMiddle_revertsEntireBatch() public {
+        uint48 exp = uint48(block.timestamp + 30 minutes);
+
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, exp);
+
+        vm.warp(exp + 1);
+
+        bytes32 invalidId = keccak256("nonexistent");
+        bytes32[] memory ids = new bytes32[](3);
+        ids[0] = TX1;
+        ids[1] = invalidId; // <-- invalid ID at position 1
+        ids[2] = TX2;       // TX2 does not exist either, but revert hits here first
+
+        vm.expectRevert(abi.encodeWithSelector(HoldNotFound.selector, invalidId));
+        core.batchExpire(ids);
+
+        // TX1 must not have changed status (full rollback)
+        assertTrue(core.getHold(TX1).status == HoldStatus.AUTHORIZED, "TX1 must still be AUTHORIZED");
+    }
+
+    // =========================================================================
+    // CRITICAL 4 — batchExpire with duplicate IDs
+    // =========================================================================
+
+    /// @dev [TX1, TX1]: the first element expires the hold (status → EXPIRED).
+    ///      The second attempt fails because the hold is no longer AUTHORIZED
+    ///      (InvalidHoldStatus). By atomicity the entire batch reverts and TX1
+    ///      remains AUTHORIZED. Confirms that atomicity is the desired behaviour.
+    function test_batchExpire_duplicateTxIds_revertsEntireBatch() public {
+        uint48 exp = uint48(block.timestamp + 30 minutes);
+
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, exp);
+
+        vm.warp(exp + 1);
+
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = TX1;
+        ids[1] = TX1; // duplicate
+
+        // The second element fails with InvalidHoldStatus(EXPIRED), reverting everything
+        vm.expectRevert(
+            abi.encodeWithSelector(InvalidHoldStatus.selector, TX1, HoldStatus.EXPIRED)
+        );
+        core.batchExpire(ids);
+
+        // Verify rollback: TX1 is still AUTHORIZED
+        assertTrue(core.getHold(TX1).status == HoldStatus.AUTHORIZED, "TX1 must still be AUTHORIZED");
+
+        (uint256 avail, uint256 locked) = core.getBalance(user, address(token));
+        assertEq(locked, AMOUNT,  "funds must remain locked");
+        assertEq(avail,  0,       "nothing must have been released");
+    }
+
+    // =========================================================================
+    // CRITICAL 5 — fee-on-transfer token is rejected at deposit
+    // =========================================================================
+
+    /// @dev Now that deposit includes a balance-before/after check, fee-on-transfer
+    ///      tokens are rejected at the deposit call itself with FeeOnTransferToken.
+    ///      The internal ledger never credits more than was actually received.
+    function test_deposit_feeOnTransfer_exposesInsolvency() public {
+        MockFeeOnTransferERC20 feeToken = new MockFeeOnTransferERC20();
+
+        vm.prank(admin);
+        core.configureToken(address(feeToken), true);
+
+        uint256 depositAmt = 100e6;
+        feeToken.mint(user, depositAmt);
+
+        vm.startPrank(user);
+        feeToken.approve(address(core), depositAmt);
+        // Deposit reverts: contract received depositAmt - FEE, not depositAmt
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FeeOnTransferToken.selector,
+                address(feeToken),
+                depositAmt,
+                depositAmt - feeToken.FEE()
+            )
+        );
+        core.deposit(address(feeToken), depositAmt);
+        vm.stopPrank();
+
+        // Ledger records nothing; contract holds no feeToken funds
+        (uint256 avail, ) = core.getBalance(user, address(feeToken));
+        assertEq(avail, 0, "ledger must be zero after revert");
+        assertEq(feeToken.balanceOf(address(core)), 0, "contract must hold no funds");
+    }
+
+    // =========================================================================
+    // BOUNDARY — capture exactly at expiresAt (inclusive limit)
+    // =========================================================================
+
+    /// @dev The condition is `block.timestamp <= hold.expiresAt`, therefore
+    ///      capturing at the exact moment of expiresAt is valid.
+    function test_capture_exactlyAtExpiresAt_succeeds() public {
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
+
+        vm.warp(expiresAt); // exactly at the boundary
+
+        vm.prank(relayer);
+        core.capture(TX1); // must succeed
+
+        assertTrue(core.getHold(TX1).status == HoldStatus.CAPTURED);
+        assertEq(token.balanceOf(merchant), AMOUNT);
+    }
+
+    // =========================================================================
+    // BOUNDARY — expire exactly at expiresAt (exclusive limit)
+    // =========================================================================
+
+    /// @dev The expire condition is `block.timestamp > hold.expiresAt`, therefore
+    ///      calling expire at the exact moment of expiresAt must revert.
+    function test_expire_exactlyAtExpiresAt_reverts() public {
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
+
+        vm.warp(expiresAt); // exactly at the boundary
+
+        vm.expectRevert(abi.encodeWithSelector(HoldNotExpired.selector, TX1, expiresAt));
+        core.expire(TX1);
+    }
+
+    // =========================================================================
+    // EDGE CASE — authorize with txId = bytes32(0)
+    // =========================================================================
+
+    /// @dev bytes32(0) is a technically valid identifier. The contract must not
+    ///      treat it as a special value; it must behave the same as any other txId.
+    function test_authorize_zeroTxId_isAccepted() public {
+        bytes32 zeroId = bytes32(0);
+
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(zeroId, user, merchant, address(token), AMOUNT, expiresAt);
+
+        assertTrue(core.getHold(zeroId).status == HoldStatus.AUTHORIZED);
+
+        // A second attempt with the same txId must revert as usual
+        token.mint(user, AMOUNT);
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        vm.expectRevert(abi.encodeWithSelector(TxIdAlreadyUsed.selector, zeroId));
+        core.authorize(zeroId, user, merchant, address(token), AMOUNT, expiresAt);
+    }
+
+    // =========================================================================
+    // EDGE CASE — merchant == user (self-payment)
+    // =========================================================================
+
+    /// @dev The contract does not prohibit merchant and user being the same address.
+    ///      In that case capture transfers funds from the contract back to the user,
+    ///      which is a valid business flow.
+    function test_authorize_merchantEqualsUser_succeeds() public {
+        uint256 preBal = token.balanceOf(user); // balance before deposit
+
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        // merchant == user
+        vm.prank(relayer);
+        core.authorize(TX1, user, user, address(token), AMOUNT, expiresAt);
+
+        (, uint256 locked) = core.getBalance(user, address(token));
+        assertEq(locked, AMOUNT, "amount must be locked");
+
+        vm.prank(relayer);
+        core.capture(TX1);
+
+        // User recovers the tokens even though they "captured" to themselves
+        assertEq(token.balanceOf(user), preBal, "user balance must equal pre-deposit balance");
+    }
+
+    // =========================================================================
+    // PAUSE SEMANTICS — expire remains available; release is blocked
+    // =========================================================================
+
+    /// @dev expire intentionally omits whenNotPaused — users must always be able
+    ///      to recover funds from expired holds even while the system is paused.
+    function test_pause_expireStillWorksWhenPaused() public {
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
+
+        vm.prank(pauser);
+        core.pause();
+
+        vm.warp(expiresAt + 1);
+
+        // expire must work regardless of pause state
+        core.expire(TX1);
+
+        (uint256 avail, uint256 locked) = core.getBalance(user, address(token));
+        assertEq(locked, 0,      "funds must not be locked");
+        assertEq(avail,  AMOUNT, "funds must be back as available");
+    }
+
+    /// @dev release has whenNotPaused, so it must revert when the contract is
+    ///      paused, even for the relayer.
+    function test_pause_releaseIsBlockedWhenPaused() public {
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        core.authorize(TX1, user, merchant, address(token), AMOUNT, expiresAt);
+
+        vm.prank(pauser);
+        core.pause();
+
+        vm.prank(relayer);
+        vm.expectRevert(); // EnforcedPause
+        core.release(TX1);
+    }
+
+    // =========================================================================
+    // MULTI-USER — multiple holds, different users, same merchant
+    // =========================================================================
+
+    /// @dev Verifies that the contract maintains separate accounting per user
+    ///      even when all holds point to the same merchant. One user's balance
+    ///      must not be affected by operations on another user's holds.
+    function test_multipleHolds_differentUsersSameMerchant() public {
+        address user2 = makeAddr("user2");
+        token.mint(user2, AMOUNT);
+
+        // Both users deposit
+        vm.startPrank(user);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        vm.startPrank(user2);
+        token.approve(address(core), AMOUNT);
+        core.deposit(address(token), AMOUNT);
+        vm.stopPrank();
+
+        // Both authorize to the same merchant
+        vm.prank(relayer);
+        core.authorize(TX1, user,  merchant, address(token), AMOUNT, expiresAt);
+        vm.prank(relayer);
+        core.authorize(TX2, user2, merchant, address(token), AMOUNT, expiresAt);
+
+        // Capture only user2's hold
+        vm.prank(relayer);
+        core.capture(TX2);
+
+        // user's hold must remain AUTHORIZED and intact
+        assertTrue(core.getHold(TX1).status == HoldStatus.AUTHORIZED, "TX1 must still be AUTHORIZED");
+        (uint256 avail1, uint256 locked1) = core.getBalance(user, address(token));
+        assertEq(locked1, AMOUNT, "user funds must still be locked");
+        assertEq(avail1,  0,      "user available must be zero");
+
+        // user2 has nothing locked and merchant received exactly AMOUNT
+        (uint256 avail2, uint256 locked2) = core.getBalance(user2, address(token));
+        assertEq(locked2, 0, "user2 must have no locked funds");
+        assertEq(avail2,  0, "user2 must have no available balance");
+        assertEq(token.balanceOf(merchant), AMOUNT, "merchant must have exactly AMOUNT");
     }
 }
 
@@ -1198,12 +1647,12 @@ contract SettlementInvariantTest is StdInvariant, Test {
 
         handler = new SettlementHandler(core, token, relayer, admin);
 
-        // Registrar usuarios iniciales
+        // Seed initial users
         handler.addUser(1);
         handler.addUser(2);
         handler.addUser(3);
 
-        // Depósito inicial para que el fuzzer tenga state útil de entrada
+        // Initial deposits so the fuzzer has useful state from the start
         handler.deposit(0, uint96(500e6));
         handler.deposit(1, uint96(500e6));
         handler.deposit(2, uint96(500e6));
@@ -1212,57 +1661,57 @@ contract SettlementInvariantTest is StdInvariant, Test {
     }
 
     // -------------------------------------------------------------------------
-    // Invariante 1 — Fondos bloqueados == suma de holds AUTHORIZED
+    // Invariant 1 — Locked funds == sum of AUTHORIZED holds
     // -------------------------------------------------------------------------
-    /// @dev Para cada usuario, los fondos marcados como `locked` deben igualar
-    ///      exactamente la suma de todos los holds todavía en estado AUTHORIZED.
-    ///      Cualquier transición (capture/release/expire) debe decrementar ambos
-    ///      de forma atómica. Una discrepancia implica corrupción de estado.
+    /// @dev For every user, the amount marked as `locked` must equal exactly the
+    ///      sum of all holds still in AUTHORIZED status. Any transition
+    ///      (capture/release/expire) must decrement both atomically. A discrepancy
+    ///      implies state corruption.
     function invariant_lockedEqualsAuthorizedHoldSums() public view {
         assertEq(
             handler.totalLocked(),
             handler.totalAuthorizedHoldAmounts(),
-            "INV1: locked != suma de holds AUTHORIZED"
+            "INV1: locked != sum of AUTHORIZED holds"
         );
     }
 
     // -------------------------------------------------------------------------
-    // Invariante 2 — El contrato siempre cubre su contabilidad interna
+    // Invariant 2 — Contract balance always covers internal accounting
     // -------------------------------------------------------------------------
-    /// @dev El saldo ERC-20 del contrato debe ser >= (available + locked) de
-    ///      todos los usuarios. Los fondos no se pueden "inventar" internamente.
+    /// @dev The ERC-20 balance of the contract must be >= (available + locked) for
+    ///      all users. Funds cannot be conjured out of thin air internally.
     function invariant_contractBalanceCoversInternalAccounting() public view {
         assertGe(
             token.balanceOf(address(core)),
             handler.totalAccountedBalance(),
-            "INV2: saldo ERC-20 del contrato < contabilidad interna"
+            "INV2: contract ERC-20 balance < internal accounting"
         );
     }
 
     // -------------------------------------------------------------------------
-    // Invariante 3 — Los holds terminales son inmutables
+    // Invariant 3 — Terminal holds are immutable
     // -------------------------------------------------------------------------
-    /// @dev Un hold que llega a CAPTURED, RELEASED o EXPIRED no puede transitar
-    ///      a ningún otro estado. Verificamos que ningún txId tracked presente
-    ///      status NONE (nunca debería retroceder a pre-existencia).
+    /// @dev A hold that reaches CAPTURED, RELEASED, or EXPIRED must not transition
+    ///      to any other status. We verify that no tracked txId shows status NONE
+    ///      (it must never roll back to pre-existence).
     function invariant_terminalHoldsStayTerminal() public view {
         bytes32[] memory txIds = handler.getActiveTxIds();
         for (uint256 i; i < txIds.length; ++i) {
             Hold memory h = core.getHold(txIds[i]);
             assertTrue(
                 h.status != HoldStatus.NONE,
-                "INV3: txId tracked retrocedio a status NONE"
+                "INV3: tracked txId rolled back to status NONE"
             );
         }
     }
 
     // -------------------------------------------------------------------------
-    // Invariante 4 — Conservación global de tokens
+    // Invariant 4 — Global token conservation
     // -------------------------------------------------------------------------
-    /// @dev El totalSupply del token no varía (no hay mint ni burn en el
-    ///      protocolo). Los tokens se redistribuyen entre wallets y contrato,
-    ///      pero el total nunca cambia.
+    /// @dev The token's totalSupply does not change (the protocol performs no
+    ///      mint or burn). Tokens are redistributed among wallets and the contract,
+    ///      but the total never changes.
     function invariant_tokenSupplyIsConserved() public view {
-        assertGt(token.totalSupply(), 0, "INV4: totalSupply debe ser positivo");
+        assertGt(token.totalSupply(), 0, "INV4: totalSupply must be positive");
     }
 }

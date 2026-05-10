@@ -6,12 +6,14 @@ const ARBISCAN = 'https://sepolia.arbiscan.io'
 export function ActivityFeed() {
   const { txHistory, logs, clearLogs } = useAppStore()
 
+  const errorCount = logs.filter(l => l.level === 'error').length
+
   return (
     <div className="card">
       <div className="card-header">
         <span className="text-sm font-semibold text-white">Activity Feed</span>
         <span className="ml-auto text-[11px] text-slate-500 mr-3">
-          {txHistory.length} transactions · {logs.filter(l => l.level === 'error').length} errors
+          {txHistory.length} transactions · {errorCount} errors
         </span>
         <button className="btn btn-ghost text-[11px] py-0.5 px-2" onClick={clearLogs}>
           Clear
@@ -40,16 +42,37 @@ export function ActivityFeed() {
           </div>
         ))}
 
-        {/* Error / info logs */}
-        {logs.filter(l => l.level === 'error').map(l => (
-          <div key={l.id} className="px-4 py-2 flex items-start gap-4 hover:bg-white/[0.02]">
-            <span className="text-slate-600 text-[11px] font-mono shrink-0">{l.ts}</span>
-            <span className="text-red-400 text-[11px] shrink-0">✗</span>
-            <span className="text-red-400 text-[11px] font-mono break-all">{l.msg}</span>
-          </div>
-        ))}
+        {/* All logs: ok/info (informational) and errors */}
+        {[...logs].reverse().map(l => {
+          if (l.level === 'error') {
+            return (
+              <div key={l.id} className="px-4 py-2 flex items-start gap-4 hover:bg-white/[0.02]">
+                <span className="text-slate-600 text-[11px] font-mono shrink-0">{l.ts}</span>
+                <span className="text-red-400 text-[11px] shrink-0">✗</span>
+                <span className="text-red-400 text-[11px] font-mono break-all">{l.msg}</span>
+              </div>
+            )
+          }
+          if (l.level === 'ok') {
+            return (
+              <div key={l.id} className="px-4 py-2 flex items-start gap-4 hover:bg-white/[0.02]">
+                <span className="text-slate-600 text-[11px] font-mono shrink-0">{l.ts}</span>
+                <span className="text-emerald-500 text-[11px] shrink-0">●</span>
+                <span className="text-slate-400 text-[11px] font-mono break-all">{l.msg}</span>
+              </div>
+            )
+          }
+          // level === 'info'
+          return (
+            <div key={l.id} className="px-4 py-2 flex items-start gap-4 hover:bg-white/[0.02]">
+              <span className="text-slate-600 text-[11px] font-mono shrink-0">{l.ts}</span>
+              <span className="text-slate-500 text-[11px] shrink-0">·</span>
+              <span className="text-slate-500 text-[11px] font-mono break-all">{l.msg}</span>
+            </div>
+          )
+        })}
 
-        {txHistory.length === 0 && logs.filter(l => l.level === 'error').length === 0 && (
+        {txHistory.length === 0 && logs.length === 0 && (
           <p className="px-4 py-5 text-[12px] text-slate-600">
             No activity yet. Send a transaction to see it here.
           </p>

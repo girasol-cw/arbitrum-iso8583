@@ -12,7 +12,7 @@ remappings = [
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
 [rpc_endpoints]
-arbitrum-sepolia = ""
+arbitrum-sepolia = "https://arbitrum-sepolia-testnet.api.pocket.network"
 
 [etherscan]
 arbitrum-sepolia = { key = "I36FHHV8SEQP38FSSMQUCI92BJK4H5PJSE" }

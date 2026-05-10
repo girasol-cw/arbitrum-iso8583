@@ -10,6 +10,10 @@ import { PaymentsPanel }  from './components/PaymentsPanel'
 import { AdminPanel }     from './components/AdminPanel'
 import { QueryPanel }     from './components/QueryPanel'
 import { ActivityFeed }   from './components/ActivityFeed'
+import { AddTokenPanel }  from './components/AddTokenPanel'
+import { BatchOpsPanel }  from './components/BatchOpsPanel'
+import { BurstOpsPanel }  from './components/BurstOpsPanel'
+import { BenchmarkPanel } from './components/BenchmarkPanel'
 
 export default function App() {
   const { connect } = useContractActions()
@@ -94,7 +98,19 @@ export default function App() {
           <QueryPanel />
         </div>
 
-        {/* Row 4: Activity Feed */}
+        {/* Row 4: Custom Token */}
+        <AddTokenPanel />
+
+        {/* Row 5: Batch | Burst */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <BatchOpsPanel />
+          <BurstOpsPanel />
+        </div>
+
+        {/* Row 6: Benchmark */}
+        <BenchmarkPanel />
+
+        {/* Row 7: Activity Feed */}
         <ActivityFeed />
 
       </main>

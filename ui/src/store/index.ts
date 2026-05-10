@@ -19,6 +19,21 @@ export interface TxEntry {
   gas?:   bigint
 }
 
+export interface BenchmarkEntry {
+  id:            number
+  action:        string
+  hash:          Hex
+  /** ms from sendTx call to hash returned by node */
+  submitMs:      number
+  /** ms from hash received to receipt confirmed */
+  confirmMs:     number
+  /** total ms from call start to receipt confirmed */
+  totalMs:       number
+  gasUsed:       bigint
+  blockNumber:   bigint
+  ts:            string
+}
+
 export interface TokenInfo {
   symbol:   string
   address:  Address
@@ -35,18 +50,23 @@ interface AppState {
   isPaused:     boolean
   logs:         LogEntry[]
   txHistory:    TxEntry[]
+  benchmarks:   BenchmarkEntry[]
+  rpcLatencyMs: number | null
   walletBalances: Record<string, bigint>
 
   setRpcUrl:       (url: string) => void
   setCoreAddress:  (addr: Address) => void
   setTokens:       (tokens: TokenInfo[]) => void
+  addToken:        (token: TokenInfo) => void
   setConnected:    (v: boolean) => void
   setActiveWallet: (idx: number) => void
   setBlockNumber:  (n: bigint) => void
   setIsPaused:     (v: boolean) => void
   setWalletBalance:(sym: string, amount: bigint) => void
+  setRpcLatency:   (ms: number) => void
   addLog:          (level: LogLevel, msg: string) => void
   addTx:           (action: string, hash: Hex, gas?: bigint) => void
+  addBenchmark:    (entry: Omit<BenchmarkEntry, 'id' | 'ts'>) => void
   clearLogs:       () => void
 }
 
@@ -62,17 +82,23 @@ export const useAppStore = create<AppState>((set) => ({
   isPaused:        false,
   logs:            [],
   txHistory:       [],
+  benchmarks:      [],
+  rpcLatencyMs:    null,
   walletBalances:  {},
 
   setRpcUrl:       (url)   => set({ rpcUrl: url }),
   setCoreAddress:  (addr)  => set({ coreAddress: addr }),
   setTokens:       (tokens)=> set({ tokens }),
+  addToken:        (token) => set(s => ({
+    tokens: s.tokens.find(t => t.address === token.address) ? s.tokens : [...s.tokens, token],
+  })),
   setConnected:    (v)     => set({ isConnected: v }),
   setActiveWallet: (idx)   => set({ activeWalletIdx: idx }),
   setBlockNumber:  (n)     => set({ blockNumber: n }),
   setIsPaused:     (v)     => set({ isPaused: v }),
   setWalletBalance:(sym, amount) =>
     set(s => ({ walletBalances: { ...s.walletBalances, [sym]: amount } })),
+  setRpcLatency:   (ms)    => set({ rpcLatencyMs: ms }),
   addLog: (level, msg) =>
     set(s => ({
       logs: [
@@ -87,5 +113,12 @@ export const useAppStore = create<AppState>((set) => ({
         ...s.txHistory,
       ].slice(0, 100),
     })),
-  clearLogs: () => set({ logs: [], txHistory: [] }),
+  addBenchmark: (entry) =>
+    set(s => ({
+      benchmarks: [
+        { ...entry, id: ++logId, ts: new Date().toLocaleTimeString() },
+        ...s.benchmarks,
+      ].slice(0, 200),
+    })),
+  clearLogs: () => set({ logs: [], txHistory: [], benchmarks: [] }),
 }))
