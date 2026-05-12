@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useContractActions } from './hooks/useContractActions'
 import { useAppStore } from './store'
 import { DEPLOYED, ARBITRUM_SEPOLIA_RPC } from './lib/contracts'
@@ -15,9 +15,12 @@ import { BatchOpsPanel }  from './components/BatchOpsPanel'
 import { BurstOpsPanel }  from './components/BurstOpsPanel'
 import { BenchmarkPanel } from './components/BenchmarkPanel'
 
+type Tab = 'dashboard' | 'benchmark'
+
 export default function App() {
   const { connect } = useContractActions()
   const { isConnected, isPaused, blockNumber } = useAppStore()
+  const [tab, setTab] = useState<Tab>('dashboard')
 
   // Auto-connect on mount
   useEffect(() => {
@@ -80,41 +83,60 @@ export default function App() {
         </div>
       </header>
 
+      {/* ── Tab bar ──────────────────────────────────────────── */}
+      <div className="bg-[#161b22] border-b border-white/5 px-6 flex gap-1">
+        {(['dashboard', 'benchmark'] as Tab[]).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2.5 text-xs font-medium tracking-wide transition-colors border-b-2 -mb-px ${
+              tab === t
+                ? 'border-indigo-500 text-indigo-300'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t === 'dashboard' ? '⬡ Dashboard' : '📊 Benchmark'}
+          </button>
+        ))}
+      </div>
+
       {/* ── Main ─────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-5 space-y-4">
 
-        {/* Row 1: Account full width */}
-        <AccountCard />
+        {tab === 'dashboard' && (
+          <>
+            {/* Row 1: Account full width */}
+            <AccountCard />
 
-        {/* Row 2: Deposit | Payments */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <DepositPanel />
-          <PaymentsPanel />
-        </div>
+            {/* Row 2: Deposit | Payments */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <DepositPanel />
+              <PaymentsPanel />
+            </div>
 
-        {/* Row 3: Admin | Query */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <AdminPanel />
-          <QueryPanel />
-        </div>
+            {/* Row 3: Admin | Query */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <AdminPanel />
+              <QueryPanel />
+            </div>
 
-        {/* Row 4: Custom Token */}
-        <AddTokenPanel />
+            {/* Row 4: Custom Token */}
+            <AddTokenPanel />
 
-        {/* Row 5: Batch | Burst */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <BatchOpsPanel />
-          <BurstOpsPanel />
-        </div>
+            {/* Row 5: Batch | Burst */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <BatchOpsPanel />
+              <BurstOpsPanel />
+            </div>
 
-        {/* Row 6: Benchmark */}
-        <BenchmarkPanel />
+            {/* Row 6: Activity Feed */}
+            <ActivityFeed />
+          </>
+        )}
 
-        {/* Row 7: Activity Feed */}
-        <ActivityFeed />
+        {tab === 'benchmark' && <BenchmarkPanel />}
 
       </main>
     </div>
   )
 }
-

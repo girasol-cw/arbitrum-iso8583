@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { isAddress, keccak256, encodePacked } from 'viem'
 import type { Address, Hex } from 'viem'
 import { useAppStore } from '../store'
@@ -21,7 +21,12 @@ export function BurstOpsPanel() {
   const { burstAuthorize, burstCapture } = useContractActions()
 
   // Config
-  const [tokenAddr,  setTokenAddr]  = useState<string>(tokens[0]?.address ?? '')
+  const [tokenAddr,  setTokenAddr]  = useState<string>('')
+
+  // Sync token when store loads asynchronously
+  useEffect(() => {
+    if (tokenAddr === '' && tokens.length > 0) setTokenAddr(tokens[0].address)
+  }, [tokens])
   const [count,      setCount]      = useState('5')
   const [amountEach, setAmountEach] = useState('1')
   const [merchant,   setMerchant]   = useState('')
@@ -32,7 +37,7 @@ export function BurstOpsPanel() {
   const [phase,   setPhase]   = useState<Phase>('idle')
   const [results, setResults] = useState<BurstResult[]>([])
 
-  const token   = tokens.find(t => t.address === tokenAddr)
+  const token   = tokens.find(t => t.address === tokenAddr) ?? tokens[0]
   const totalTxs = parseInt(count) || 0
 
   const getMerchant = (i: number): Address => {

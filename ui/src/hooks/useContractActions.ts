@@ -231,6 +231,87 @@ export function useContractActions() {
   const expire      = (txId: Hex) => sendTx('expire',  [txId])
   const batchExpire = (txIds: Hex[]) => sendTx('batchExpire', [txIds])
 
+  // ── sendTxLight: like sendTx but skips refreshWalletBalances ─────────────
+  // Used in batch/burst loops to avoid N×M RPC calls.
+  const sendTxLight = useCallback(
+    async (
+      fnName: string,
+      args: readonly unknown[],
+    ): Promise<{ hash: Hex; gas: bigint } | null> => {
+      try {
+        const pub  = getPublicClient()
+        const wc   = walletClient()
+        const hash = await writeContract(wc, {
+          address:      coreAddr,
+          abi:          SETTLEMENT_ABI,
+          functionName: fnName as never,
+          args:         args as never,
+        })
+        const receipt = await waitForTransactionReceipt(pub, { hash })
+        store.addTx(fnName, hash, receipt.gasUsed)
+        store.addLog('ok', `${fnName} | tx: ${hash.slice(0, 14)}… | gas: ${receipt.gasUsed}`)
+        return { hash, gas: receipt.gasUsed }
+      } catch (err: unknown) {
+        const msg = extractError(err)
+        store.addLog('error', `${fnName}: ${msg}`)
+        return null
+      }
+    },
+    [coreAddr, walletClient],
+  )
+
+  // ── batchRun: sequential authorize + optional capture, no per-tx refresh ──
+  const batchRun = useCallback(
+    async (
+      items: Array<{
+        txId:      Hex
+        user:      Address
+        merchant:  Address
+        token:     Address
+        human:     string
+        decimals:  number
+        expiresIn: number
+      }>,
+      mode: 'authorize' | 'authorize+capture',
+      onProgress: (result: { index: number; txId: Hex; action: string; status: 'ok' | 'error'; detail: string }) => void,
+      shouldAbort: () => boolean,
+    ) => {
+      for (let i = 0; i < items.length; i++) {
+        if (shouldAbort()) break
+        const item = items[i]
+        const expiresAt = BigInt(Math.floor(Date.now() / 1000) + item.expiresIn)
+
+        const authRes = await sendTxLight('authorize', [
+          item.txId, item.user, item.merchant, item.token,
+          toTokenAmount(item.human, item.decimals), expiresAt,
+        ])
+
+        onProgress({
+          index:  i + 1,
+          txId:   item.txId,
+          action: 'authorize',
+          status: authRes ? 'ok' : 'error',
+          detail: authRes ? authRes.hash : 'failed — check balance / relayer role',
+        })
+
+        if (authRes && mode === 'authorize+capture') {
+          if (shouldAbort()) break
+          const capRes = await sendTxLight('capture', [item.txId])
+          onProgress({
+            index:  i + 1,
+            txId:   item.txId,
+            action: 'capture',
+            status: capRes ? 'ok' : 'error',
+            detail: capRes ? capRes.hash : 'capture failed',
+          })
+        }
+      }
+      // Single balance refresh at the end
+      await refreshWalletBalances(coreAddr)
+    },
+    [coreAddr, sendTxLight, refreshWalletBalances],
+  )
+
   // ── burstAuthorize: N authorizations with sequential nonces ───────────────
   // Fires all writeContract calls immediately (no receipt wait), collecting
   // hashes, then waits for all receipts in parallel. This avoids nonce
@@ -446,6 +527,7 @@ export function useContractActions() {
     release,
     expire,
     batchExpire,
+    batchRun,
     burstCapture,
     pause,
     unpause,

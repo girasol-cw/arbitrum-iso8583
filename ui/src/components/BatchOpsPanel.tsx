@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { isAddress, keccak256, encodePacked } from 'viem'
 import type { Address, Hex } from 'viem'
 import { useAppStore } from '../store'
@@ -18,10 +18,10 @@ interface TxResult {
 
 export function BatchOpsPanel() {
   const { tokens } = useAppStore()
-  const { authorize, capture } = useContractActions()
+  const { batchRun } = useContractActions()
 
   // Config
-  const [tokenAddr,  setTokenAddr]  = useState<string>(tokens[0]?.address ?? '')
+  const [tokenAddr,  setTokenAddr]  = useState<string>('')
   const [count,      setCount]      = useState('5')
   const [amountEach, setAmountEach] = useState('1')
   const [merchant,   setMerchant]   = useState('')
@@ -35,8 +35,13 @@ export function BatchOpsPanel() {
   const [progress,  setProgress]  = useState(0)
   const abortRef = useRef(false)
 
+  // Sync token when store loads asynchronously
+  useEffect(() => {
+    if (tokenAddr === '' && tokens.length > 0) setTokenAddr(tokens[0].address)
+  }, [tokens])
+
   const totalTxs = parseInt(count) || 0
-  const token = tokens.find(t => t.address === tokenAddr)
+  const token = tokens.find(t => t.address === tokenAddr) ?? tokens[0]
 
   // Derive merchant: if blank, use a deterministic address per-tx
   const getMerchant = (i: number): Address => {
@@ -54,37 +59,28 @@ export function BatchOpsPanel() {
     setResults([])
     setProgress(0)
 
-    const n = Math.min(Math.max(totalTxs, 1), 50)
+    const n       = Math.min(Math.max(totalTxs, 1), 50)
+    const expSecs = parseInt(expiresIn) || 3600
 
-    for (let i = 0; i < n; i++) {
-      if (abortRef.current) break
+    const items = Array.from({ length: n }, (_, i) => ({
+      txId:      randomBytes32(),
+      user:      userAddr as Address,
+      merchant:  getMerchant(i),
+      token:     token.address as Address,
+      human:     amountEach,
+      decimals:  token.decimals,
+      expiresIn: expSecs,
+    }))
 
-      const txId    = randomBytes32()
-      const merch   = getMerchant(i)
-      const expSecs = parseInt(expiresIn) || 3600
-
-      // 1. Authorize
-        const authRes = await authorize(txId, userAddr as Address, merch, token.address as Address, amountEach, token.decimals, expSecs)
-      if (!authRes) {
-        setResults(r => [...r, { index: i + 1, txId, status: 'error', action: 'authorize', detail: 'failed — check balance / relayer role' }])
-        setProgress(i + 1)
-        continue
-      }
-
-      setResults(r => [...r, { index: i + 1, txId, status: 'ok', action: 'authorize', detail: authRes.hash }])
-
-      // 2. Capture if requested
-      if (mode === 'authorize+capture') {
-        const capRes = await capture(txId)
-        if (!capRes) {
-          setResults(r => [...r, { index: i + 1, txId, status: 'error', action: 'capture', detail: 'failed' }])
-        } else {
-          setResults(r => [...r, { index: i + 1, txId, status: 'ok', action: 'capture', detail: capRes.hash }])
-        }
-      }
-
-      setProgress(i + 1)
-    }
+    await batchRun(
+      items,
+      mode,
+      (result) => {
+        setResults(r => [...r, result])
+        if (result.action === 'authorize') setProgress(p => p + 1)
+      },
+      () => abortRef.current,
+    )
 
     setRunning(false)
   }
