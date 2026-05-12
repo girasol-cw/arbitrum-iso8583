@@ -14,6 +14,7 @@ import { AddTokenPanel }  from './components/AddTokenPanel'
 import { BatchOpsPanel }  from './components/BatchOpsPanel'
 import { BurstOpsPanel }  from './components/BurstOpsPanel'
 import { BenchmarkPanel } from './components/BenchmarkPanel'
+import { StressOpsPanel } from './components/StressOpsPanel'
 
 type Tab = 'dashboard' | 'benchmark'
 
@@ -129,7 +130,10 @@ export default function App() {
               <BurstOpsPanel />
             </div>
 
-            {/* Row 6: Activity Feed */}
+            {/* Row 6: Stress scheduler */}
+            <StressOpsPanel />
+
+            {/* Row 7: Activity Feed */}
             <ActivityFeed />
           </>
         )}

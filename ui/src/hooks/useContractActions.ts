@@ -325,7 +325,7 @@ export function useContractActions() {
       human:     string
       decimals:  number
       expiresIn: number
-    }>) => {
+    }>, options?: { skipRefresh?: boolean }) => {
       const pub  = getPublicClient()
       const wc   = walletClient()
       const acct = wc.account
@@ -362,7 +362,9 @@ export function useContractActions() {
         }),
       )
 
-      await refreshWalletBalances(coreAddr)
+      if (!options?.skipRefresh) {
+        await refreshWalletBalances(coreAddr)
+      }
 
       return results.map((r, i) => {
         if (r.status === 'fulfilled' && r.value.ok) {
@@ -379,7 +381,7 @@ export function useContractActions() {
 
   // ── burstCapture: N captures with sequential nonces ───────────────────────
   const burstCapture = useCallback(
-    async (txIds: Hex[]) => {
+    async (txIds: Hex[], options?: { skipRefresh?: boolean }) => {
       const pub  = getPublicClient()
       const wc   = walletClient()
       const acct = wc.account
@@ -411,7 +413,9 @@ export function useContractActions() {
         }),
       )
 
-      await refreshWalletBalances(coreAddr)
+      if (!options?.skipRefresh) {
+        await refreshWalletBalances(coreAddr)
+      }
 
       return results.map((r, i) => {
         if (r.status === 'fulfilled' && r.value.ok) {
