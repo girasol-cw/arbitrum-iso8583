@@ -30,6 +30,7 @@ The deployment uses a **UUPS upgradeable architecture**, with a standalone imple
 | Implementation | `0x655d759764122E84B8cA0B156eE320B2D9Bd50B3` |
 | Proxy | `0xAaE3116210b866f00ccf8dCbD540A6Cc5d070d72` |
 | Configured token (`USDC` mock) | `0xA730eFe70d3f67d08dD4a17a867c95bFe1F33CfA` |
+| Configured token (`USDT` mock) | `0xC7f974b3710560D070dEc95288339EfAB683C417` |
 | Operator / Admin wallet | `0x0C015C85340793854e7528943746447713e2C326` |
 
 ## 5. Roles
@@ -45,14 +46,14 @@ At deployment time, the same operator address was assigned all active privileged
 
 ## 6. Tokens Configured
 
-Only one token was configured in this deployment.
-
 | Token | Address | Type | Decimals | Status | Notes |
 |---|---|---|---|---|---|
-| `USDC` | `0xA730eFe70d3f67d08dD4a17a867c95bFe1F33CfA` | Mock ERC-20 | `6` | Enabled | Used for milestone testing and initial liquidity |
+| `USDC` | `0xA730eFe70d3f67d08dD4a17a867c95bFe1F33CfA` | Mock ERC-20 | `6` | Enabled | Initial deployment |
+| `USDT` | `0xC7f974b3710560D070dEc95288339EfAB683C417` | Mock ERC-20 | `6` | Enabled | Added via `DeployUSDT.s.sol` |
 
 ### Initial token mint
 - `100,000 USDC` (mock) minted to: `0x0C015C85340793854e7528943746447713e2C326`
+- `100,000 USDT` (mock) minted to: `0x0C015C85340793854e7528943746447713e2C326`
 
 ## 7. Flows Tested
 

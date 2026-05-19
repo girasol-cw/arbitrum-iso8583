@@ -27,7 +27,7 @@ export default function App() {
   useEffect(() => {
     const tokens: Address[] = []
     if (isAddress(DEPLOYED.usdc)) tokens.push(DEPLOYED.usdc)
-    if (isAddress(DEPLOYED.weth)) tokens.push(DEPLOYED.weth as Address)
+    if (isAddress(DEPLOYED.usdt)) tokens.push(DEPLOYED.usdt)
     connect(ARBITRUM_SEPOLIA_RPC, DEPLOYED.proxy, tokens)
   }, [])
 

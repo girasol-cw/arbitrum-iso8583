@@ -8,6 +8,5 @@ export const DEPLOYED = {
   impl:  '0x655d759764122E84B8cA0B156eE320B2D9Bd50B3' as Address,
   proxy: '0xAaE3116210b866f00ccf8dCbD540A6Cc5d070d72' as Address,
   usdc:  '0xA730eFe70d3f67d08dD4a17a867c95bFe1F33CfA' as Address,
-  /** Fill in after retrieving from deployment logs */
-  weth:  '' as Address | '',
+  usdt:  '0xC7f974b3710560D070dEc95288339EfAB683C417' as Address,
 } as const

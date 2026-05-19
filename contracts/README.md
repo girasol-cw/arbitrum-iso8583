@@ -1,42 +1,45 @@
-## Foundry
+# contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Foundry project containing the `ArbitrumSettlementCore` contract stack.
 
-Foundry consists of:
+## Structure
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
+```
+src/
+  ArbitrumSettlementCore.sol   # Core settlement logic (UUPS upgradeable)
+  interfaces/
+    IArbitrumSettlementCore.sol
+    ISettlementTypes.sol
+test/
+  ArbitrumSettlementCore.t.sol # 82 tests (unit, fuzz, invariant)
+script/
+  Counter.s.sol                # Deploy script
+broadcast/
+  Deploy.s.sol/421614/         # Arbitrum Sepolia deployment artifacts
 ```
 
-### Test
+## Commands
 
 ```shell
-$ forge test
+# Build
+forge build
+
+# Run all tests
+forge test -vv
+
+# Gas snapshot
+forge snapshot
+
+# Deploy to Arbitrum Sepolia
+forge script script/Counter.s.sol --rpc-url arbitrum_sepolia --broadcast
 ```
 
-### Format
+## Test results (M1)
 
-```shell
-$ forge fmt
 ```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
+82 tests passed, 0 failed
+  78 unit / fuzz tests
+   4 invariant tests
 ```
 
 ### Anvil

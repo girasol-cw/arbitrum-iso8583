@@ -19,15 +19,15 @@ import {MockERC20} from "../test/mocks/MockERC20.sol";
  */
 contract Deploy is Script {
     // Initial mint amounts
-    uint256 internal constant USDC_MINT = 100_000e6; // 100 000 USDC (6 decimals)
-    uint256 internal constant WETH_MINT = 50 ether;  // 50 WETH      (18 decimals)
+    uint256 internal constant USDC_MINT = 100_000e6; // 100 000 USDC / USDT (6 decimals)
 
     function run() external {
         vm.startBroadcast();
         address deployer = msg.sender;
 
         // ── 1. Deploy tokens ────────────────────────────────────────────────
-        MockERC20 usdc = new MockERC20("USD Coin",  "USDC", 6);
+        MockERC20 usdc = new MockERC20("USD Coin",   "USDC", 6);
+        MockERC20 usdt = new MockERC20("Tether USD", "USDT", 6);
 
         // ── 2. Deploy core contract (UUPS upgradeable) ──────────────────────
         ArbitrumSettlementCore impl = new ArbitrumSettlementCore();
@@ -40,9 +40,11 @@ contract Deploy is Script {
 
         // ── 4. Configure tokens ───────────────────────────────────────────────
         core.configureToken(address(usdc), true);
+        core.configureToken(address(usdt), true);
 
         // ── 5. Mint tokens to deployer ────────────────────────────────────────
         usdc.mint(deployer, USDC_MINT);
+        usdt.mint(deployer, USDC_MINT);
 
         vm.stopBroadcast();
 
@@ -53,6 +55,7 @@ contract Deploy is Script {
         console.log("Impl contract  : %s", address(impl));
         console.log("Proxy contract : %s", address(proxy));
         console.log("USDC token    : %s", address(usdc));
+        console.log("USDT token    : %s", address(usdt));
         console.log("----------------------------------------");
         console.log("Roles");
         console.log("  Admin / Pauser / TokenAdmin / Relayer : %s", deployer);
