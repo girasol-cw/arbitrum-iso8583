@@ -1,0 +1,39 @@
+/**
+ * test/errors/classifier.test.ts
+ * Unit tests for error classification.
+ */
+import { classifyError } from '../../src/errors/classifier.js'
+
+describe('classifyError', () => {
+  it('classifies nonce too low', () => {
+    const err = new Error('nonce too low')
+    const result = classifyError(err)
+    expect(result.code).toBe('NONCE_CONFLICT')
+    expect(result.isoResponseCode).toBe('96')
+  })
+
+  it('classifies network / transport error', () => {
+    const err = Object.assign(new Error('ECONNREFUSED'), { name: 'FetchError' })
+    const result = classifyError(err)
+    expect(result.code).toBe('RPC_FAILURE')
+  })
+
+  it('classifies paused contract', () => {
+    const err = new Error('EnforcedPause: paused')
+    const result = classifyError(err)
+    expect(result.code).toBe('CONTRACT_PAUSED')
+    expect(result.isoResponseCode).toBe('91')
+  })
+
+  it('returns UNKNOWN for unrecognised errors', () => {
+    const result = classifyError(new Error('some random error'))
+    expect(result.code).toBe('UNKNOWN')
+    expect(result.isoResponseCode).toBe('05')
+  })
+
+  it('handles non-Error objects gracefully', () => {
+    expect(() => classifyError(null)).not.toThrow()
+    expect(() => classifyError('string error')).not.toThrow()
+    expect(() => classifyError(42)).not.toThrow()
+  })
+})
