@@ -15,12 +15,22 @@ import { BatchOpsPanel }  from './components/BatchOpsPanel'
 import { BurstOpsPanel }  from './components/BurstOpsPanel'
 import { BenchmarkPanel } from './components/BenchmarkPanel'
 import { StressOpsPanel } from './components/StressOpsPanel'
+import { IsoSimPanel }          from './components/IsoSimPanel'
+import { BackendPaymentsPanel } from './components/BackendPaymentsPanel'
+import { PosTerminalPanel }     from './components/PosTerminalPanel'
 
-type Tab = 'dashboard' | 'benchmark'
+type Tab = 'dashboard' | 'pos-terminal' | 'iso-sim' | 'benchmark'
+
+const TAB_LABELS: Record<Tab, string> = {
+  'dashboard':    '⬡ Dashboard',
+  'pos-terminal': '⊡ POS Terminal',
+  'iso-sim':      '⇄ ISO Sim',
+  'benchmark':    '📊 Benchmark',
+}
 
 export default function App() {
   const { connect } = useContractActions()
-  const { isConnected, isPaused, blockNumber } = useAppStore()
+  const { isConnected, isPaused, blockNumber, backendHealthy } = useAppStore()
   const [tab, setTab] = useState<Tab>('dashboard')
 
   // Auto-connect on mount
@@ -81,12 +91,23 @@ export default function App() {
           }`}>
             {isConnected ? 'Connected' : 'Connecting…'}
           </span>
+
+          {/* Backend health */}
+          <span className={`px-2.5 py-1 rounded-full border text-[11px] ${
+            backendHealthy === true
+              ? 'bg-teal-950 text-teal-300 border-teal-800'
+              : backendHealthy === false
+                ? 'bg-red-950 text-red-400 border-red-800 animate-pulse'
+                : 'bg-slate-800 text-slate-500 border-slate-700'
+          }`}>
+            {backendHealthy === true ? '⬡ Backend' : backendHealthy === false ? '✗ Backend' : '… Backend'}
+          </span>
         </div>
       </header>
 
       {/* ── Tab bar ──────────────────────────────────────────── */}
       <div className="bg-[#161b22] border-b border-white/5 px-6 flex gap-1">
-        {(['dashboard', 'benchmark'] as Tab[]).map(t => (
+        {(Object.keys(TAB_LABELS) as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -96,7 +117,7 @@ export default function App() {
                 : 'border-transparent text-slate-500 hover:text-slate-300'
             }`}
           >
-            {t === 'dashboard' ? '⬡ Dashboard' : '📊 Benchmark'}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -139,6 +160,31 @@ export default function App() {
         )}
 
         {tab === 'benchmark' && <BenchmarkPanel />}
+
+        {/* ── POS Terminal tab: full wire-protocol emulation (DEV ONLY) ───── */}
+        {tab === 'pos-terminal' && (
+          <>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+              <PosTerminalPanel />
+              <BackendPaymentsPanel />
+            </div>
+            <ActivityFeed />
+          </>
+        )}
+
+        {/* ── ISO Sim tab: JSON HTTP shortcut (no binary codec required) ─── */}
+        {tab === 'iso-sim' && (
+          <>
+            {/* ISO sim + backend payments side by side on large screens */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+              <IsoSimPanel />
+              <BackendPaymentsPanel />
+            </div>
+
+            {/* Activity Feed so on-chain hashes are also visible here */}
+            <ActivityFeed />
+          </>
+        )}
 
       </main>
     </div>

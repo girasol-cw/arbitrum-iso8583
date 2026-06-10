@@ -1,9 +1,9 @@
 /**
  * observability/metrics.ts
- * Contadores en memoria simples. Para MVP no necesitamos Prometheus:
- * estos valores se exponen en GET /metrics como JSON plano y se loguean
- * con pino. Si en el futuro se quiere Prometheus, basta reemplazar este
- * módulo con prom-client sin cambiar los importadores.
+ * Simple in-memory counters. For the MVP we do not need Prometheus:
+ * these values are exposed by GET /metrics as plain JSON and logged with pino.
+ * If we want Prometheus later, this module can be replaced with prom-client
+ * without changing importers.
  */
 
 const _counts: Record<string, number> = {}
@@ -12,21 +12,23 @@ function inc(name: string): void {
   _counts[name] = (_counts[name] ?? 0) + 1
 }
 
-/** Retorna copia de todos los contadores (para el endpoint /metrics). */
+/** Return a copy of all counters for the /metrics endpoint. */
 export function getMetrics(): Record<string, number> {
   return { ..._counts }
 }
 
-// ── Contadores nombrados ──────────────────────────────────────────────────────
-// Se mantiene la misma interfaz que prom-client para poder migrarlo fácil.
+// ── Named counters ────────────────────────────────────────────────────────────
+// Keep the same interface as prom-client so migration stays easy.
 
-export const isoMessagesReceived = { inc: () => inc('iso_messages_received') }
-export const isoMessagesRouted   = { inc: () => inc('iso_messages_routed') }
-export const isoDuplicates       = { inc: () => inc('iso_duplicates') }
-export const txSubmitted         = { inc: () => inc('tx_submitted') }
-export const txConfirmed         = { inc: () => inc('tx_confirmed') }
-export const errorClassified     = { inc: () => inc('error_classified') }
+type Labels = Record<string, string | number>
 
-// Stub de Gauge/Histogram para que los importadores no fallen
+export const isoMessagesReceived = { inc: (_labels?: Labels) => inc('iso_messages_received') }
+export const isoMessagesRouted   = { inc: (_labels?: Labels) => inc('iso_messages_routed') }
+export const isoDuplicates       = { inc: (_labels?: Labels) => inc('iso_duplicates') }
+export const txSubmitted         = { inc: (_labels?: Labels) => inc('tx_submitted') }
+export const txConfirmed         = { inc: (_labels?: Labels) => inc('tx_confirmed') }
+export const errorClassified     = { inc: (_labels?: Labels) => inc('error_classified') }
+
+// Gauge/Histogram stubs so importers do not fail.
 export const relayerNonce = { set: (_v: number) => {} }
 export const txLatency    = { observe: (_l: object, _v: number) => {} }

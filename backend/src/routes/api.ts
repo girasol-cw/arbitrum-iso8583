@@ -43,9 +43,9 @@ router.post('/iso/intake', async (req: Request, res: Response) => {
 })
 
 // ── GET /payments/:txId ───────────────────────────────────────────────────────
-router.get('/payments/:txId', (req: Request, res: Response) => {
+router.get('/payments/:txId', async (req: Request, res: Response) => {
   const { txId } = req.params
-  const row = getPaymentLog(txId)
+  const row = await getPaymentLog(txId)
   if (!row) {
     res.status(404).json({ error: 'Payment not found', txId })
     return
@@ -54,10 +54,10 @@ router.get('/payments/:txId', (req: Request, res: Response) => {
 })
 
 // ── GET /payments ─────────────────────────────────────────────────────────────
-router.get('/payments', (req: Request, res: Response) => {
+router.get('/payments', async (req: Request, res: Response) => {
   const limit  = Math.min(Number(req.query['limit']  ?? 50), 200)
   const offset = Number(req.query['offset'] ?? 0)
-  res.json(listPaymentLogs(limit, offset))
+  res.json(await listPaymentLogs(limit, offset))
 })
 
 // ── GET /metrics ──────────────────────────────────────────────────────────────

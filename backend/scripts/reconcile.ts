@@ -14,11 +14,14 @@
 import 'dotenv/config'
 import { parseArgs }         from 'node:util'
 import { writeFileSync, mkdirSync } from 'node:fs'
-import { createPublicClient, http, type Address, decodeEventLog } from 'viem'
+import { createPublicClient, type Address, decodeEventLog } from 'viem'
 import { arbitrumSepolia } from 'viem/chains'
+import { gte }              from 'drizzle-orm'
 import { config }            from '../src/config.js'
-import { getDb, _resetDbForTests } from '../src/db/client.js'
+import { getDb }             from '../src/db/client.js'
+import { paymentLog, reconciliationRun } from '../src/db/schema.js'
 import { SETTLEMENT_ABI }    from '../src/relayer/abi.js'
+import { rpcTransport }      from '../src/relayer/wallet.js'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 const { values: args } = parseArgs({
@@ -43,7 +46,7 @@ async function main() {
 
   const client = createPublicClient({
     chain: arbitrumSepolia,
-    transport: http(config.RPC_URL),
+    transport: rpcTransport(),
   })
 
   const CONTRACT = config.CONTRACT_ADDRESS as Address
@@ -87,11 +90,15 @@ async function main() {
   console.log(`  Onchain events found: ${onchainTxIds.size}`)
 
   // ── 2. Load offchain logs ─────────────────────────────────────────────────
-  const offchainRows = db
-    .prepare(`SELECT tx_id, status, onchain_status FROM payment_log WHERE created_at >= ?`)
-    .all(Math.floor(Date.now() / 1000) - 7 * 86_400) as {
-      tx_id: string; status: string; onchain_status: string | null
-    }[]
+  const cutoff = Math.floor(Date.now() / 1000) - 7 * 86_400
+  const offchainRows = await db
+    .select({
+      tx_id:          paymentLog.tx_id,
+      status:         paymentLog.status,
+      onchain_status: paymentLog.onchain_status,
+    })
+    .from(paymentLog)
+    .where(gte(paymentLog.created_at, cutoff))
 
   console.log(`  Offchain records checked: ${offchainRows.length}`)
 
@@ -148,16 +155,13 @@ async function main() {
   writeFileSync(reportPath, JSON.stringify(report, null, 2))
 
   // ── 5. Persist run to DB ──────────────────────────────────────────────────
-  db.prepare(`
-    INSERT INTO reconciliation_run (from_block, to_block, total_checked, mismatches, report)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(
-    Number(fromBlock),
-    Number(toBlock),
-    offchainRows.length,
-    mismatches.length,
-    JSON.stringify(mismatches),
-  )
+  await db.insert(reconciliationRun).values({
+    from_block:    Number(fromBlock),
+    to_block:      Number(toBlock),
+    total_checked: offchainRows.length,
+    mismatches:    mismatches.length,
+    report:        JSON.stringify(mismatches),
+  })
 
   // ── 6. Print summary ──────────────────────────────────────────────────────
   console.log('\n── Reconciliation Summary ──────────────────────────────────')

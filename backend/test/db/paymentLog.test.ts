@@ -65,12 +65,16 @@ describe('updatePaymentStatus', () => {
       tx_hash: '0xtxhash',
       block_number: 42,
       onchain_status: 'authorized',
+      retry_count: 1,
+      last_error: 'NONCE_CONFLICT:retryable',
     })
     const row = getPaymentLog(SAMPLE_TX_ID)!
     expect(row.status).toBe('confirmed')
     expect(row.tx_hash).toBe('0xtxhash')
     expect(row.block_number).toBe(42)
     expect(row.onchain_status).toBe('authorized')
+    expect(row.retry_count).toBe(1)
+    expect(row.last_error).toBe('NONCE_CONFLICT:retryable')
   })
 })
 
@@ -90,5 +94,4 @@ describe('listPaymentLogs', () => {
     expect(listPaymentLogs(2, 4).length).toBe(1)
   })
 })
-
 

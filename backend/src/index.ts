@@ -6,14 +6,16 @@
  */
 import express from 'express'
 import { config } from './config.js'
-import { getDb } from './db/client.js'
+import { getDb, runMigrations, closeDb } from './db/client.js'
 import { router } from './routes/api.js'
 import { logger } from './observability/logger.js'
 import { syncNonce, relayerAddress } from './relayer/wallet.js'
+import { createIsoTcpServer } from './tcp/isoTcpServer.js'
+import { attachPosSimBridge } from './tcp/posSimBridge.js'
 
 async function bootstrap() {
   // ── 1. Database ────────────────────────────────────────────────────────────
-  getDb() // triggers migrations
+  await runMigrations()
 
   // ── 2. Relayer nonce ───────────────────────────────────────────────────────
   if (config.NODE_ENV !== 'test') {
@@ -21,7 +23,10 @@ async function bootstrap() {
     logger.info({ address: relayerAddress() }, 'Relayer wallet ready')
   }
 
-  // ── 3. HTTP server ─────────────────────────────────────────────────────────
+  // ── 3. ISO 8583 TCP server ────────────────────────────────────────────
+  const tcpServer = config.NODE_ENV !== 'test' ? createIsoTcpServer() : null
+
+  // ── 4. HTTP server ──────────────────────────────────────────────────
   const app = express()
   app.use(express.json({ limit: '1mb' }))
 
@@ -40,16 +45,29 @@ async function bootstrap() {
     )
   })
 
-  // ── 4. Graceful shutdown ───────────────────────────────────────────────────
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received – shutting down gracefully')
-    server.close(() => process.exit(0))
-  })
+  // ── 5. POS simulator WebSocket bridge (DEVELOPMENT / TESTING ONLY) ────────
+  //
+  //  In production, real POS terminals connect directly via raw TCP (TCP_PORT).
+  //  Browsers cannot open raw TCP sockets, so in non-production environments we
+  //  attach a WebSocket bridge at ws://…/ws/pos that forwards binary ISO 8583
+  //  frames to and from the isoTcpServer over a loopback TCP connection.
+  //
+  //  Flow:   Browser → WebSocket /ws/pos → posSimBridge → TCP:TCP_PORT → isoTcpServer
+  //
+  //  The bridge is intentionally disabled in production (NODE_ENV=production).
+  if (config.NODE_ENV !== 'production') {
+    attachPosSimBridge(server)
+  }
 
-  process.on('SIGINT', () => {
-    logger.info('SIGINT received – shutting down')
-    server.close(() => process.exit(0))
-  })
+  // ── 6. Graceful shutdown ───────────────────────────────────────────────
+  const shutdown = () => {
+    server.close()
+    tcpServer?.close()
+    closeDb().finally(() => process.exit(0))
+  }
+
+  process.on('SIGTERM', () => { logger.info('SIGTERM received – shutting down gracefully'); shutdown() })
+  process.on('SIGINT',  () => { logger.info('SIGINT received – shutting down');             shutdown() })
 }
 
 bootstrap().catch((err) => {

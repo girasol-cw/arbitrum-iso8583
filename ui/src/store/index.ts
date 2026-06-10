@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Address, Hex } from 'viem'
 import { ARBITRUM_SEPOLIA_RPC, DEPLOYED } from '../lib/contracts'
+import type { PaymentLogRow } from '../lib/backendApi'
 
 export type LogLevel = 'info' | 'ok' | 'error'
 
@@ -54,6 +55,11 @@ interface AppState {
   rpcLatencyMs: number | null
   walletBalances: Record<string, bigint>
 
+  /** Backend health: null = unknown, true = up, false = down */
+  backendHealthy:   boolean | null
+  /** Last payments fetched from the backend DB */
+  backendPayments:  PaymentLogRow[]
+
   setRpcUrl:       (url: string) => void
   setCoreAddress:  (addr: Address) => void
   setTokens:       (tokens: TokenInfo[]) => void
@@ -64,6 +70,8 @@ interface AppState {
   setIsPaused:     (v: boolean) => void
   setWalletBalance:(sym: string, amount: bigint) => void
   setRpcLatency:   (ms: number) => void
+  setBackendHealthy: (v: boolean) => void
+  setBackendPayments:(rows: PaymentLogRow[]) => void
   addLog:          (level: LogLevel, msg: string) => void
   addTx:           (action: string, hash: Hex, gas?: bigint) => void
   addBenchmark:    (entry: Omit<BenchmarkEntry, 'id' | 'ts'>) => void
@@ -85,6 +93,8 @@ export const useAppStore = create<AppState>((set) => ({
   benchmarks:      [],
   rpcLatencyMs:    null,
   walletBalances:  {},
+  backendHealthy:  null,
+  backendPayments: [],
 
   setRpcUrl:       (url)   => set({ rpcUrl: url }),
   setCoreAddress:  (addr)  => set({ coreAddress: addr }),
@@ -99,6 +109,8 @@ export const useAppStore = create<AppState>((set) => ({
   setWalletBalance:(sym, amount) =>
     set(s => ({ walletBalances: { ...s.walletBalances, [sym]: amount } })),
   setRpcLatency:   (ms)    => set({ rpcLatencyMs: ms }),
+  setBackendHealthy: (v)   => set({ backendHealthy: v }),
+  setBackendPayments:(rows)=> set({ backendPayments: rows }),
   addLog: (level, msg) =>
     set(s => ({
       logs: [

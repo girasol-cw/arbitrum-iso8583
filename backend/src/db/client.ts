@@ -1,46 +1,58 @@
 /**
  * db/client.ts
- * better-sqlite3 database client – single instance for the process.
- * Creates the data directory and runs migrations at startup.
+ * Drizzle ORM client for PostgreSQL (postgresjs driver).
+ *
+ * getDb() returns the Drizzle instance synchronously (lazy init).
+ * runMigrations() must be called once at startup to ensure tables exist.
+ * closeDb() drains the connection pool – call on SIGTERM/SIGINT.
+ * _resetDbForTests() truncates all tables between tests.
  */
-import Database from 'better-sqlite3'
-import { mkdirSync } from 'fs'
-import { dirname } from 'path'
-import { config } from '../config.js'
+import postgres from 'postgres'
+import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import * as schema from './schema.js'
 import { CREATE_TABLES_SQL } from './schema.js'
+import { config } from '../config.js'
 import { logger } from '../observability/logger.js'
 
-let _db: Database.Database | null = null
+type DrizzleDb = PostgresJsDatabase<typeof schema>
 
-export function getDb(): Database.Database {
+let _sql: ReturnType<typeof postgres> | null = null
+let _db:  DrizzleDb | null = null
+
+/** Returns the singleton Drizzle client, creating it on first call. */
+export function getDb(): DrizzleDb {
   if (_db) return _db
-
-  // Ensure data directory exists
-  mkdirSync(dirname(config.DB_PATH), { recursive: true })
-
-  _db = new Database(config.DB_PATH)
-
-  // WAL mode for better concurrent read performance
-  _db.pragma('journal_mode = WAL')
-  _db.pragma('foreign_keys = ON')
-
-  // Run schema migrations
-  _db.exec(CREATE_TABLES_SQL)
-
-  logger.info({ path: config.DB_PATH }, 'SQLite database initialised')
+  _sql = postgres(config.DATABASE_URL, { max: 10 })
+  _db  = drizzle(_sql, { schema })
   return _db
 }
 
-/** For testing: close and re-open with a fresh in-memory DB */
-export function _resetDbForTests(inMemory = true): void {
-  if (_db) {
-    _db.close()
-    _db = null
+/**
+ * Apply bootstrap DDL (CREATE TABLE IF NOT EXISTS).
+ * Call once at server startup before serving any requests.
+ */
+export async function runMigrations(): Promise<void> {
+  const sql = _sql ?? (getDb(), _sql!)
+  await sql.unsafe(CREATE_TABLES_SQL)
+  logger.info({ url: config.DATABASE_URL.replace(/:.*@/, ':***@') }, 'PostgreSQL tables initialised')
+}
+
+/** Drain the connection pool. Call on graceful shutdown. */
+export async function closeDb(): Promise<void> {
+  if (_sql) {
+    await _sql.end()
+    _sql = null
+    _db  = null
   }
-  if (inMemory) {
-    _db = new Database(':memory:')
-    _db.pragma('journal_mode = WAL')
-    _db.pragma('foreign_keys = ON')
-    _db.exec(CREATE_TABLES_SQL)
-  }
+}
+
+/**
+ * Truncate all application tables.
+ * Used by tests to get a clean state between runs without reconnecting.
+ */
+export async function _resetDbForTests(): Promise<void> {
+  const db = getDb()
+  // Delete in dependency order (no FK constraints, but explicit is safer)
+  await db.delete(schema.reconciliationRun)
+  await db.delete(schema.paymentLog)
 }

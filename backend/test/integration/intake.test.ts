@@ -85,11 +85,27 @@ describe('processIsoMessage – submission failure', () => {
     mockSubmitFn.mockResolvedValueOnce({
       success: false,
       classified: { code: 'INSUFFICIENT_FUNDS', isoResponseCode: '51', message: 'insufficient funds' },
-      retrying: false,
+      attempts: 1,
+      retryable: false,
     })
     const result = await processIsoMessage(GOOD_MSG)
     expect(result.status).toBe('declined')
     expect(result.isoResponseCode).toBe('51')
+  })
+
+  it('stores retry metadata for retryable submission failures', async () => {
+    mockSubmitFn.mockResolvedValueOnce({
+      success: false,
+      classified: { code: 'RPC_FAILURE', isoResponseCode: '96', message: 'rpc failure' },
+      attempts: 2,
+      retryable: true,
+    })
+    const result = await processIsoMessage(GOOD_MSG)
+    const log = getPaymentLog(result.txId)!
+
+    expect(result.status).toBe('declined')
+    expect(log.retry_count).toBe(1)
+    expect(log.last_error).toBe('RPC_FAILURE:retryable')
   })
 })
 
@@ -129,5 +145,16 @@ describe('processIsoMessage – onchain revert', () => {
     expect(result.status).toBe('declined')
     expect(result.isoResponseCode).toBe('05')
     expect(result.message).toBe('InsufficientAvailableBalance')
+  })
+})
+
+describe('processIsoMessage – pending transaction', () => {
+  it('returns pending when receipt times out', async () => {
+    mockReceiptFn.mockResolvedValueOnce({
+      outcome: 'timeout', isoResponseCode: '96', txHash: '0xtxhash', blockNumber: null,
+    })
+    const result = await processIsoMessage(GOOD_MSG)
+    expect(result.status).toBe('pending')
+    expect(result.isoResponseCode).toBe('96')
   })
 })

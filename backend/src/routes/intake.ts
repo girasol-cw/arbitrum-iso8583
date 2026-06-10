@@ -8,25 +8,25 @@
  * It is called by the Express route handler (routes/intake.ts) and can also
  * be invoked directly in tests.
  */
-import { parseIsoMessage }     from '../iso/parser.js'
-import { routeIsoMessage }     from '../iso/router.js'
+import { parseIsoMessage } from '../iso/parser.js'
+import { routeIsoMessage } from '../iso/router.js'
 import { deriveTxId, deriveReversalTxId } from '../mapping/txId.js'
-import { normalize }           from '../mapping/normalizer.js'
+import { normalize } from '../mapping/normalizer.js'
 import {
   buildAuthorizeCall,
   buildCaptureCall,
   buildReleaseCall,
 } from '../mapping/contractMapper.js'
-import { submitContractCall }  from '../relayer/submitter.js'
-import { waitForReceipt }      from '../relayer/responseHandler.js'
+import { submitContractCall } from '../relayer/submitter.js'
+import { waitForReceipt } from '../relayer/responseHandler.js'
 import {
   isDuplicate,
   createPaymentLog,
   updatePaymentStatus,
   getPaymentLog,
 } from '../db/paymentLog.js'
-import { classifyError }       from '../errors/classifier.js'
-import { logger }              from '../observability/logger.js'
+import { classifyError } from '../errors/classifier.js'
+import { logger } from '../observability/logger.js'
 import {
   isoMessagesReceived,
   isoMessagesRouted,
@@ -93,10 +93,10 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
       : deriveTxId(parsed)
 
   // ── 4. Idempotency check ──────────────────────────────────────────────────
-  if (isDuplicate(txId)) {
+  if (await isDuplicate(txId)) {
     isoDuplicates.inc()
     log.info({ txId }, 'Duplicate ISO message – returning cached result')
-    const existing = getPaymentLog(txId)
+    const existing = await getPaymentLog(txId)
     return {
       txId,
       action: routing.action,
@@ -117,20 +117,20 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
     errorClassified.inc({ code: classified.code })
 
     // Log to DB even if we can't fully normalise
-    createPaymentLog({
+    await createPaymentLog({
       txId,
-      mti:            parsed.mti,
-      stan:           parsed.stan,
-      rrn:            parsed.rrn,
-      merchantRef:    parsed.merchantRef,
-      terminalId:     parsed.terminalId,
-      cardToken:      parsed.cardToken,
-      amountDecimal:  parsed.amountDecimal,
-      currencyAlpha:  parsed.currencyAlpha,
-      action:         routing.action,
-      isoRaw:         parsed.raw,
+      mti: parsed.mti,
+      stan: parsed.stan,
+      rrn: parsed.rrn,
+      merchantRef: parsed.merchantRef,
+      terminalId: parsed.terminalId,
+      cardToken: parsed.cardToken,
+      amountDecimal: parsed.amountDecimal,
+      currencyAlpha: parsed.currencyAlpha,
+      action: routing.action,
+      isoRaw: parsed.raw,
     })
-    updatePaymentStatus(txId, 'failed', { error_code: classified.code })
+    await updatePaymentStatus(txId, 'failed', { error_code: classified.code })
 
     return {
       txId,
@@ -142,21 +142,21 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
   }
 
   // ── 6. Persist initial log ────────────────────────────────────────────────
-  createPaymentLog({
+  await createPaymentLog({
     txId,
-    mti:              parsed.mti,
-    stan:             parsed.stan,
-    rrn:              parsed.rrn,
-    merchantRef:      parsed.merchantRef,
-    terminalId:       parsed.terminalId,
-    cardToken:        parsed.cardToken,
-    userAddress:      paymentMsg.userAddress,
-    merchantAddress:  paymentMsg.merchantAddress,
-    tokenAddress:     paymentMsg.tokenAddress,
-    amountDecimal:    parsed.amountDecimal,
-    currencyAlpha:    parsed.currencyAlpha,
-    action:           routing.action,
-    isoRaw:           parsed.raw,
+    mti: parsed.mti,
+    stan: parsed.stan,
+    rrn: parsed.rrn,
+    merchantRef: parsed.merchantRef,
+    terminalId: parsed.terminalId,
+    cardToken: parsed.cardToken,
+    userAddress: paymentMsg.userAddress,
+    merchantAddress: paymentMsg.merchantAddress,
+    tokenAddress: paymentMsg.tokenAddress,
+    amountDecimal: parsed.amountDecimal,
+    currencyAlpha: parsed.currencyAlpha,
+    action: routing.action,
+    isoRaw: parsed.raw,
   })
 
   // ── 7. Build contract call params ─────────────────────────────────────────
@@ -175,13 +175,15 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
   }
 
   // ── 8. Submit to chain ────────────────────────────────────────────────────
-  updatePaymentStatus(txId, 'submitted')
+  await updatePaymentStatus(txId, 'submitted')
   const submittedAt = Date.now()
   const submitResult = await submitContractCall(callParams!, txId)
 
   if (!submitResult.success) {
-    updatePaymentStatus(txId, 'failed', {
+    await updatePaymentStatus(txId, 'failed', {
       error_code: submitResult.classified.code,
+      retry_count: submitResult.attempts - 1,
+      last_error: `${submitResult.classified.code}${submitResult.retryable ? ':retryable' : ''}`,
     })
     return {
       txId,
@@ -201,6 +203,7 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
   )
 
   const approved = receipt.outcome !== 'reverted' && receipt.outcome !== 'timeout'
+  const pending = receipt.outcome === 'timeout'
 
   // For authorize_and_capture: if auth confirmed, immediately submit capture
   if (routing.action === 'authorize_and_capture' && approved) {
@@ -219,7 +222,7 @@ export async function processIsoMessage(rawInput: unknown): Promise<IntakeRespon
   return {
     txId,
     action: routing.action,
-    status: approved ? 'approved' : 'declined',
+    status: pending ? 'pending' : approved ? 'approved' : 'declined',
     isoResponseCode: receipt.isoResponseCode,
     txHash: receipt.txHash,
     blockNumber: receipt.blockNumber ?? undefined,

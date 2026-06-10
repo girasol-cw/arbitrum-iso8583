@@ -1,9 +1,18 @@
 /**
  * test/setup.ts
- * Jest global setup: initialise in-memory SQLite DB before each test run.
+ * Jest global setup: run migrations once and truncate tables before each test.
+ * Requires a real PostgreSQL database at DATABASE_URL (set in test/setEnv.cjs).
  */
-import { _resetDbForTests } from '../src/db/client.js'
+import { runMigrations, _resetDbForTests, closeDb } from '../src/db/client.js'
 
-beforeEach(() => {
-  _resetDbForTests(true)
+beforeAll(async () => {
+  await runMigrations()
+})
+
+beforeEach(async () => {
+  await _resetDbForTests()
+})
+
+afterAll(async () => {
+  await closeDb()
 })

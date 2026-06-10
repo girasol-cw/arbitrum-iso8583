@@ -1,12 +1,12 @@
 /**
  * relayer/responseHandler.ts
- * Espera el recibo de una transacción y determina el resultado onchain.
+ * Waits for a transaction receipt and determines the onchain outcome.
  *
- * Mapeo de eventos → outcome:
- *   PaymentAuthorized → 'authorized'  (aprobado)
- *   PaymentCaptured   → 'captured'    (capturado)
- *   PaymentReleased   → 'released'    (reversado)
- *   receipt.status === 'reverted' → 'reverted' (rechazado)
+ * Event mapping → outcome:
+ *   PaymentAuthorized → 'authorized'  (approved)
+ *   PaymentCaptured   → 'captured'    (captured)
+ *   PaymentReleased   → 'released'    (reversed)
+ *   receipt.status === 'reverted' → 'reverted' (declined)
  *   timeout (>2 min) → 'timeout'
  */
 import { type Address, decodeEventLog } from 'viem'
@@ -22,7 +22,7 @@ export type OnchainOutcome = 'authorized' | 'captured' | 'released' | 'reverted'
 
 export interface ReceiptResult {
   outcome:         OnchainOutcome
-  /** Código de respuesta ISO 8583 */
+  /** ISO 8583 response code */
   isoResponseCode: string
   txHash:          string
   blockNumber:     number | null
@@ -42,19 +42,19 @@ export async function waitForReceipt(
   try {
     const receipt = await publicClient.waitForTransactionReceipt({
       hash: txHash,
-      confirmations: 1,
-      timeout: 120_000,  // 2 minutos máximo
+      confirmations: 2,
+      timeout: 120_000,  // 2 minutes maximum
     })
 
-    // ── Revertida ───────────────────────────────────────────────────────────
+    // ── Reverted ───────────────────────────────────────────────────────────
     if (receipt.status === 'reverted') {
       let revertReason = 'unknown revert'
-      try { revertReason = await getRevertReason(txHash) } catch { /* ignora */ }
+      try { revertReason = await getRevertReason(txHash) } catch { /* ignore */ }
 
-      log.warn({ blockNumber: receipt.blockNumber.toString(), revertReason }, 'Transacción revertida')
+      log.warn({ blockNumber: receipt.blockNumber.toString(), revertReason }, 'Transaction reverted')
       txConfirmed.inc()
 
-      updatePaymentStatus(txId, 'failed', {
+      await updatePaymentStatus(txId, 'failed', {
         tx_hash:        txHash,
         block_number:   Number(receipt.blockNumber),
         onchain_status: 'reverted',
@@ -63,13 +63,13 @@ export async function waitForReceipt(
       return { outcome: 'reverted', isoResponseCode: '05', txHash, blockNumber: Number(receipt.blockNumber), revertReason }
     }
 
-    // ── Exitosa – leer eventos ──────────────────────────────────────────────
+    // ── Successful – read events ──────────────────────────────────────────────
     const outcome = extractOutcome(receipt.logs)
     const elapsed = (Date.now() - submittedAt) / 1000
-    log.info({ outcome, blockNumber: receipt.blockNumber.toString(), elapsed }, 'Transacción confirmada')
+    log.info({ outcome, blockNumber: receipt.blockNumber.toString(), elapsed }, 'Transaction confirmed')
     txConfirmed.inc()
 
-    updatePaymentStatus(txId, 'confirmed', {
+    await updatePaymentStatus(txId, 'confirmed', {
       tx_hash:        txHash,
       block_number:   Number(receipt.blockNumber),
       onchain_status: outcome,
@@ -78,12 +78,13 @@ export async function waitForReceipt(
 
   } catch (err) {
     const classified = classifyError(err)
-    log.error({ err, classified }, 'waitForReceipt falló')
+    log.error({ err, classified }, 'waitForReceipt failed')
 
-    updatePaymentStatus(txId, 'failed', {
+    await updatePaymentStatus(txId, 'pending', {
       tx_hash:        txHash,
       onchain_status: 'timeout',
       revert_reason:  classified.message,
+      last_error:     classified.code,
     })
     return { outcome: 'timeout', isoResponseCode: '96', txHash, blockNumber: null }
   }
@@ -96,11 +97,13 @@ type Log = { topics: readonly `0x${string}`[]; data: `0x${string}` }
 function extractOutcome(logs: Log[]): OnchainOutcome {
   for (const log of logs) {
     try {
-      const decoded = decodeEventLog({ abi: SETTLEMENT_ABI, data: log.data, topics: log.topics })
+      if (log.topics.length === 0) continue
+      const topics = [...log.topics] as [`0x${string}`, ...`0x${string}`[]]
+      const decoded = decodeEventLog({ abi: SETTLEMENT_ABI, data: log.data, topics })
       if (decoded.eventName === 'PaymentAuthorized') return 'authorized'
       if (decoded.eventName === 'PaymentCaptured')   return 'captured'
       if (decoded.eventName === 'PaymentReleased')   return 'released'
-    } catch { /* no es un evento nuestro */ }
+    } catch { /* not our event */ }
   }
   return 'authorized'
 }
@@ -108,7 +111,7 @@ function extractOutcome(logs: Log[]): OnchainOutcome {
 async function getRevertReason(txHash: `0x${string}`): Promise<string> {
   const tx = await publicClient.getTransaction({ hash: txHash })
   try {
-    await publicClient.call({ to: tx.to,, data: tx.input, value: tx.value, blockNumber: tx.blockNumber! })
+    await publicClient.call({ to: tx.to, data: tx.input, value: tx.value, blockNumber: tx.blockNumber! })
     return 'no revert reason'
   } catch (err: unknown) {
     const e = err as { shortMessage?: string; message?: string }

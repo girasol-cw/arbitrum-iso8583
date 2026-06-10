@@ -1,18 +1,18 @@
 /**
  * relayer/submitter.ts
- * Envía una transacción al contrato y devuelve el txHash.
+ * Sends a transaction to the contract and returns the txHash.
  *
- * Flujo:
- *   1. Estimar gas → si revierte, devolver error sin gastar gas en cadena.
- *   2. Obtener siguiente nonce local.
- *   3. Enviar tx con writeContract.
- *   4. Si hay conflicto de nonce → resincronizar y reintentar una vez.
- *   5. Cualquier otro error → devolver SubmitError sin reintentos.
+ * Flow:
+ *   1. Estimate gas → if it reverts, return error without spending on-chain gas.
+ *   2. Get next local nonce.
+ *   3. Send tx with writeContract.
+ *   4. If nonce conflict → re-sync and retry once.
+ *   5. Any other error → return SubmitError without retries.
  *
- * ¿Por qué no retry automático?
- *   Para MVP preferimos fallo rápido y visible. Los reintentos con backoff
- *   añaden complejidad de estado; si se necesitan en producción, se agrega
- *   una cola en la base de datos.
+ * Why no automatic retry?
+ *   For MVP we prefer fast and visible failure. Retries with backoff
+ *   add state complexity; if needed in production, a queue in the database
+ *   can be added.
  */
 import { type Address } from 'viem'
 import { config } from '../config.js'
@@ -23,8 +23,8 @@ import { walletClient, publicClient, account, nextNonce, resetNonce } from './wa
 import { classifyError } from '../errors/classifier.js'
 import type { ContractCallParams } from '../mapping/contractMapper.js'
 
-export interface SubmitResult { success: true;  txHash: `0x${string}` }
-export interface SubmitError  { success: false; classified: ReturnType<typeof classifyError> }
+export interface SubmitResult { success: true;  txHash: `0x${string}`; attempts: number }
+export interface SubmitError  { success: false; classified: ReturnType<typeof classifyError>; attempts: number; retryable: boolean }
 export type SubmitOutcome = SubmitResult | SubmitError
 
 const CONTRACT = config.CONTRACT_ADDRESS as Address
@@ -37,7 +37,7 @@ export async function submitContractCall(
   const log = logger.child({ txId, action: params.functionName, attempt })
 
   try {
-    // 1. Estimación de gas – detecta reverts antes de gastar gas real
+    // 1. Gas estimation – detects reverts before spending real gas
     let gas: bigint
     try {
       const raw = await publicClient.estimateContractGas({
@@ -47,19 +47,21 @@ export async function submitContractCall(
         args: params.args as any,
         account,
       })
-      gas = raw * 12n / 10n  // +20% de buffer
+      gas = raw * 12n / 10n  // +20% buffer
+      const gasLimit = BigInt(config.GAS_LIMIT)
+      if (gas > gasLimit) gas = gasLimit
     } catch (err) {
       const classified = classifyError(err)
       errorClassified.inc()
-      log.warn({ classified }, 'Estimación de gas falló – la tx revertería')
-      return { success: false, classified }
+      log.warn({ classified }, 'Gas estimation failed – the tx would revert')
+      return { success: false, classified, attempts: attempt, retryable: false }
     }
 
-    // 2. Nonce local
+    // 2. Local nonce
     const nonce = await nextNonce()
-    log.info({ nonce, gas: gas.toString() }, 'Enviando transacción')
+    log.info({ nonce, gas: gas.toString() }, 'Sending transaction')
 
-    // 3. Enviar
+    // 3. Send
     const txHash = await walletClient.writeContract({
       address: CONTRACT,
       abi: SETTLEMENT_ABI,
@@ -70,21 +72,26 @@ export async function submitContractCall(
     })
 
     txSubmitted.inc()
-    log.info({ txHash }, 'Transacción enviada')
-    return { success: true, txHash }
+    log.info({ txHash }, 'Transaction sent')
+    return { success: true, txHash, attempts: attempt }
 
   } catch (err) {
     const classified = classifyError(err)
     errorClassified.inc()
 
-    // Conflicto de nonce: resincronizar y reintentar una sola vez
+    // Nonce conflict: re-sync and retry once 
     if (classified.code === 'NONCE_CONFLICT' && attempt === 1) {
       await resetNonce()
-      log.warn('Conflicto de nonce – reintentando una vez')
+      log.warn('Nonce conflict – retrying once')
       return submitContractCall(params, txId, 2)
     }
 
-    log.error({ classified }, 'Envío fallido')
-    return { success: false, classified }
+    log.error({ classified }, 'TX Failed')
+    return {
+      success: false,
+      classified,
+      attempts: attempt,
+      retryable: classified.code === 'RPC_FAILURE' || classified.code === 'NONCE_CONFLICT',
+    }
   }
 }

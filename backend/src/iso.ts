@@ -2,12 +2,12 @@
  * iso.ts  –  Parser + Router ISO 8583
  *
  * parse: { mti, fields } → ParsedIsoFields
- * route: mti → acción del contrato
+ * route: mti → contract action
  */
 import { z } from 'zod'
 import { keccak256, encodePacked } from 'viem'
 
-// ── Constantes de campos ──────────────────────────────────────────────────────
+// ── Field constants ──────────────────────────────────────────────────────
 const F = { PAN:'002', PROC_CODE:'003', AMOUNT_TRANSACTION:'004',
   TRANSMISSION_DT:'007', STAN:'011', LOCAL_TIME:'012', LOCAL_DATE:'013',
   RETRIEVAL_REF:'037', CARD_ACCEPTOR_ID:'042', CARD_ACCEPTOR_NAME:'043',
@@ -15,7 +15,7 @@ const F = { PAN:'002', PROC_CODE:'003', AMOUNT_TRANSACTION:'004',
 
 const CURRENCY: Record<string, string> = { '840':'USD','978':'EUR','032':'ARS','986':'BRL','484':'MXN' }
 
-// ── Tipos públicos ────────────────────────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────────────────────
 export interface ParsedIsoFields {
   mti: string; stan: string; rrn: string; amountDecimal: string
   currencyNumeric: string; currencyAlpha: string; cardToken: string
@@ -38,7 +38,7 @@ export function parseIsoMessage(input: unknown): ParsedIsoFields {
   const { mti, fields } = Schema.parse(input)
   const req = (k: string, label: string) => {
     const v = fields[k]?.trim()
-    if (!v) throw new Error(`Campo ISO ${k} (${label}) faltante en MTI ${mti}`)
+    if (!v) throw new Error(`ISO Field ${k} (${label}) missing in MTI ${mti}`)
     return v
   }
   const opt = (k: string) => fields[k]?.trim() ?? ''
@@ -73,11 +73,11 @@ export function routeIsoMessage(p: ParsedIsoFields): RoutingResult {
     case '0200': return { action: p.processingCode.startsWith('28') ? 'authorize_and_capture' : 'capture' }
     case '0400': return { action: 'release' }
     case '0800': return { action: 'heartbeat' }
-    default:     return { action: 'unsupported', reason: `MTI ${p.mti} no soportado` }
+    default:     return { action: 'unsupported', reason: `MTI ${p.mti} not supported` }
   }
 }
 
-// ── txId determinista ─────────────────────────────────────────────────────────
+// ── Deterministic txId ─────────────────────────────────────────────────────────
 export function deriveTxId(f: ParsedIsoFields): `0x${string}` {
   return keccak256(encodePacked(
     ['string','string','string','string','string'],
