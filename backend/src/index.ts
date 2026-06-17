@@ -29,6 +29,28 @@ async function bootstrap() {
 
   // ── 4. HTTP server ──────────────────────────────────────────────────
   const app = express()
+
+  const allowedOrigins = config.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  app.use((req, res, next) => {
+    const requestOrigin = req.headers.origin
+    const allowAll = allowedOrigins.includes('*')
+    const allowedOrigin = allowAll ? '*' : allowedOrigins.find((origin) => origin === requestOrigin)
+
+    if (allowedOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
+      res.setHeader('Vary', 'Origin')
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).end()
+      return
+    }
+
+    next()
+  })
+
   app.use(express.json({ limit: '1mb' }))
 
   // Request logger middleware

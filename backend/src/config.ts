@@ -45,6 +45,10 @@ const ConfigSchema = z.object({
   // ── Database ─────────────────────────────────────────────────────────────
   DATABASE_URL: z.string().url().default('postgresql://postgres:postgres@localhost:5432/middleware'),
 
+  // ── Browser clients ─────────────────────────────────────────────────────
+  /** Comma-separated allowed browser origins for CORS. Use "*" for public APIs. */
+  CORS_ORIGIN: z.string().default('*'),
+
   // ── Address mappings ─────────────────────────────────────────────────────
   /** JSON: { "<card token>": "<0xAddress>" } */
   CARD_MAPPING_FILE:     z.string().default('./data/card-mapping.json'),

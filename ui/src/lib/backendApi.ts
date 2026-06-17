@@ -1,11 +1,11 @@
 /**
  * backendApi.ts
  * Typed HTTP client for the Settlement Core backend (port 3100).
- * All requests are routed through the Vite dev-server proxy at /api/*
- * which strips the prefix and forwards to http://localhost:3100.
+ * In development, requests default to the Vite dev-server proxy at /api/*.
+ * In deployed static builds, set VITE_BACKEND_URL to the backend origin.
  */
 
-const BASE = '/api'
+import { BACKEND_HTTP_BASE } from './backendConfig'
 
 // ── Types (mirroring backend interfaces) ─────────────────────────────────────
 
@@ -186,7 +186,7 @@ export function buildHeartbeatMsg(): IsoMessage {
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${BACKEND_HTTP_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })

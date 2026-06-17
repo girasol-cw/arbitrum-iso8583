@@ -32,6 +32,7 @@ import {
   randomStan,
   type RawIsoMessage,
 } from '../lib/posCodec'
+import { backendWsUrl } from '../lib/backendConfig'
 import { useAppStore } from '../store'
 
 // ── Pre-configured card tokens y merchants (wallets derivadas del test mnemonic) ──
@@ -134,8 +135,8 @@ export function PosTerminalPanel() {
     pushLine(mkLine('· info', 'text-slate-400',
       'Opening WebSocket to /ws/pos (bridge → TCP:5000 → isoTcpServer)…'))
 
-    // The Vite dev-server proxies ws://localhost:5173/ws/pos → ws://localhost:3100/ws/pos
-    const wsUrl = `ws://${window.location.host}/ws/pos`
+    // Dev defaults to the Vite proxy. Deployed builds can target a separate backend.
+    const wsUrl = backendWsUrl()
     const ws    = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws

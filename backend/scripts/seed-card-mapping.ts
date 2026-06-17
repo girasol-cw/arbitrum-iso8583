@@ -25,23 +25,24 @@ const { values: args } = parseArgs({
   options: { file: { type: 'string' } },
   strict: false,
 })
+const fileArg = typeof args.file === 'string' ? args.file : undefined
 
 const DEFAULT_PATH = resolve(
   import.meta.dirname ?? process.cwd(),
   '../../contracts/script/output/funded-wallets.json',
 )
 
-const jsonPath = args.file
-  ? resolve(process.cwd(), args.file)
+const jsonPath = fileArg
+  ? resolve(process.cwd(), fileArg)
   : DEFAULT_PATH
 
 // ── Cargar JSON o usar testWallets como fallback ──────────────────────────────
 
 let mapping: Record<string, string>
 
-if (args.file) {
+if (fileArg) {
   // Explicit path: must exist
-  const explicit = resolve(process.cwd(), args.file)
+  const explicit = resolve(process.cwd(), fileArg)
   try {
     mapping = JSON.parse(readFileSync(explicit, 'utf-8'))
     console.log(`\nSource: ${explicit}`)
