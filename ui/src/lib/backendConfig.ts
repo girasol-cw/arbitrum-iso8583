@@ -10,13 +10,18 @@ function currentHostWsUrl(): string {
   return `${protocol}//${window.location.host}/ws/pos`
 }
 
+function withPosWsPath(value: string): string {
+  const url = withoutTrailingSlash(value)
+  return url.endsWith('/ws/pos') ? url : `${url}/ws/pos`
+}
+
 export const BACKEND_HTTP_BASE = rawBackendUrl ? withoutTrailingSlash(rawBackendUrl) : '/api'
 
 export function backendWsUrl(): string {
-  if (rawBackendWsUrl) return withoutTrailingSlash(rawBackendWsUrl)
+  if (rawBackendWsUrl) return withPosWsPath(rawBackendWsUrl)
 
   if (rawBackendUrl?.startsWith('http://') || rawBackendUrl?.startsWith('https://')) {
-    return `${withoutTrailingSlash(rawBackendUrl).replace(/^http/, 'ws')}/ws/pos`
+    return withPosWsPath(rawBackendUrl.replace(/^http/, 'ws'))
   }
 
   return currentHostWsUrl()

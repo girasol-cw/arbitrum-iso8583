@@ -77,9 +77,13 @@ async function bootstrap() {
   //
   //  Flow:   Browser → WebSocket /ws/pos → posSimBridge → TCP:TCP_PORT → isoTcpServer
   //
-  //  The bridge is intentionally disabled in production (NODE_ENV=production).
-  if (config.NODE_ENV !== 'production') {
+  //  By default the bridge is mounted outside production. Production deployments
+  //  can opt in for demos by setting ENABLE_POS_WS_BRIDGE=true.
+  const posWsBridgeEnabled = config.ENABLE_POS_WS_BRIDGE ?? config.NODE_ENV !== 'production'
+  if (posWsBridgeEnabled) {
     attachPosSimBridge(server)
+  } else {
+    logger.info('POS simulator WebSocket bridge disabled')
   }
 
   // ── 6. Graceful shutdown ───────────────────────────────────────────────

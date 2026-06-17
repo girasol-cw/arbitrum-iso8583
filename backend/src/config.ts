@@ -48,6 +48,8 @@ const ConfigSchema = z.object({
   // ── Browser clients ─────────────────────────────────────────────────────
   /** Comma-separated allowed browser origins for CORS. Use "*" for public APIs. */
   CORS_ORIGIN: z.string().default('*'),
+  /** Enable the browser POS simulator WebSocket bridge at /ws/pos. */
+  ENABLE_POS_WS_BRIDGE: z.coerce.boolean().optional(),
 
   // ── Address mappings ─────────────────────────────────────────────────────
   /** JSON: { "<card token>": "<0xAddress>" } */

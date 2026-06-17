@@ -16,7 +16,7 @@
  * ║    Browser UI ──(WebSocket)──▶ this bridge ──(TCP loopback)──▶ isoTcpServer║
  * ║                               /ws/pos                     :TCP_PORT        ║
  * ║                                                                             ║
- * ║  The bridge is only mounted when NODE_ENV !== 'production'.                 ║
+ * ║  The bridge is mounted when ENABLE_POS_WS_BRIDGE=true or outside prod.      ║
  * ║  It is transparent: every binary WebSocket message received from the        ║
  * ║  browser is written verbatim to the TCP socket, and every byte the TCP      ║
  * ║  server sends back is forwarded verbatim to the WebSocket client.           ║
@@ -114,12 +114,12 @@ function handleWsClient(ws: WebSocket, req: IncomingMessage): void {
  * Attach a WebSocket server to the given HTTP server that acts as a bridge
  * between the browser POS simulator and the ISO 8583 TCP server.
  *
- * ⚠️  Only call this in non-production environments.
+ * ⚠️  Intended for development and demo environments.
  *
  * @param httpServer  The same Express HTTP server instance used by the app.
  *
  * Usage in index.ts:
- *   if (config.NODE_ENV !== 'production') {
+ *   if (posWsBridgeEnabled) {
  *     attachPosSimBridge(server)
  *   }
  */
@@ -139,7 +139,7 @@ export function attachPosSimBridge(httpServer: HttpServer): WebSocketServer {
     '╔════════════════════════════════════════════════════════════╗\n' +
     '║  POS Simulator WebSocket bridge mounted at ws://…/ws/pos  ║\n' +
     '║  THIS IS FOR DEVELOPMENT / TESTING ONLY.                  ║\n' +
-    '║  Disable by setting NODE_ENV=production.                  ║\n' +
+    '║  Disable by setting ENABLE_POS_WS_BRIDGE=false.           ║\n' +
     '╚════════════════════════════════════════════════════════════╝',
   )
 
