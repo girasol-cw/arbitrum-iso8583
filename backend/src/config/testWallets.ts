@@ -62,3 +62,10 @@ export const TEST_WALLETS: TestWallet[] = [
 export const TEST_CARD_MAP: Record<string, `0x${string}`> = Object.fromEntries(
   TEST_WALLETS.map((w) => [w.cardToken, w.address]),
 )
+
+/** merchant_ref → address mapping for local ISO/POS simulators */
+export const TEST_MERCHANT_MAP: Record<string, `0x${string}`> = {
+  MERCHANT001: '0x0C015C85340793854e7528943746447713e2C326',
+  MERCHANT002: '0x5f7215df3fbd70DDbb68CeC0dC0a23E4Ab77b562',
+  MERCHANT003: '0xC480FF6Dc39Eb77D35F96CaA281EF08EBcB63C94',
+}

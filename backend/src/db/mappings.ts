@@ -151,8 +151,12 @@ export async function seedMappings(): Promise<void> {
     db.select().from(merchantMapping).limit(1),
   ])
 
-  const cardJson     = loadJson(config.CARD_MAPPING_FILE)
-  const merchantJson = loadJson(config.MERCHANT_MAPPING_FILE)
+  const cardFileMap     = loadJson(config.CARD_MAPPING_FILE)
+  const merchantFileMap = loadJson(config.MERCHANT_MAPPING_FILE)
+  const useDevFallbacks = config.NODE_ENV !== 'production'
+  const fallbackMaps    = useDevFallbacks ? await import('../config/testWallets.js') : null
+  const cardJson        = Object.keys(cardFileMap).length > 0 || !fallbackMaps ? cardFileMap : fallbackMaps.TEST_CARD_MAP
+  const merchantJson    = Object.keys(merchantFileMap).length > 0 || !fallbackMaps ? merchantFileMap : fallbackMaps.TEST_MERCHANT_MAP
 
   if (existingCards.length === 0 && Object.keys(cardJson).length > 0) {
     const now = Math.floor(Date.now() / 1000)

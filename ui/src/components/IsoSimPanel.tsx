@@ -23,12 +23,12 @@ import {
 } from '../lib/backendApi'
 import { useAppStore } from '../store'
 
-// ── Card tokens and merchants from the backend data files ─────────────────────
+// ── Card tokens and merchants from the backend seed data ──────────────────────
 const CARD_TOKENS = [
-  { label: 'CARD_TOKEN_001',    value: 'CARD_TOKEN_001' },
-  { label: '4111111111111111',  value: '4111111111111111' },
-  { label: 'TOK_ALICE_001',     value: 'TOK_ALICE_001' },
-  { label: 'TOK_BOB_001',       value: 'TOK_BOB_001' },
+  { label: 'TOK_TEST_001  (0x5f72...b562)', value: 'TOK_TEST_001' },
+  { label: 'TOK_TEST_002  (0xC480...C94)',  value: 'TOK_TEST_002' },
+  { label: 'TOK_TEST_003  (0x9b96...280d)', value: 'TOK_TEST_003' },
+  { label: 'TOK_TEST_004  (0x8222...5DB3)', value: 'TOK_TEST_004' },
 ] as const
 
 const MERCHANTS = [

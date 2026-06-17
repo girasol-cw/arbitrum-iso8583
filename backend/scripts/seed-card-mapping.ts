@@ -1,7 +1,8 @@
 /**
  * scripts/seed-card-mapping.ts
  * Reads the JSON produced by FundUsers.s.sol and upserts into the
- * card_mapping table so the backend can resolve card_token → address.
+ * card_mapping table. It also upserts local development merchant mappings so
+ * the ISO/POS simulators can resolve merchant_ref → address.
  *
  * Usage:
  *   tsx scripts/seed-card-mapping.ts
@@ -16,8 +17,8 @@ import { resolve }                  from 'node:path'
 import { parseArgs }                from 'node:util'
 import { sql }                      from 'drizzle-orm'
 import { getDb, runMigrations, closeDb } from '../src/db/client.js'
-import { cardMapping }              from '../src/db/schema.js'
-import { TEST_CARD_MAP }            from '../src/config/testWallets.js'
+import { cardMapping, merchantMapping } from '../src/db/schema.js'
+import { TEST_CARD_MAP, TEST_MERCHANT_MAP } from '../src/config/testWallets.js'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ if (entries.length === 0) {
   process.exit(1)
 }
 
-console.log(`Inserting ${entries.length} entries into card_mapping...\n`)
+console.log(`Upserting ${entries.length} entries into card_mapping...\n`)
 
 for (const [cardToken, rawAddress] of entries) {
   const ethAddress = rawAddress.toLowerCase()
@@ -100,5 +101,34 @@ for (const [cardToken, rawAddress] of entries) {
   console.log(`  ✓  ${cardToken}  →  ${ethAddress}`)
 }
 
+const merchantEntries = Object.entries(TEST_MERCHANT_MAP)
+console.log(`\nUpserting ${merchantEntries.length} entries into merchant_mapping...\n`)
+
+for (const [merchantRef, rawAddress] of merchantEntries) {
+  const ethAddress = rawAddress.toLowerCase()
+
+  await db
+    .insert(merchantMapping)
+    .values({
+      merchant_ref: merchantRef,
+      eth_address:  ethAddress,
+      label:        merchantRef,
+      active:       true,
+      created_at:   Math.floor(Date.now() / 1000),
+      updated_at:   Math.floor(Date.now() / 1000),
+    })
+    .onConflictDoUpdate({
+      target: merchantMapping.merchant_ref,
+      set: {
+        eth_address: ethAddress,
+        label:       merchantRef,
+        active:      true,
+        updated_at:  sql`extract(epoch from now())::integer`,
+      },
+    })
+
+  console.log(`  ✓  ${merchantRef}  →  ${ethAddress}`)
+}
+
 await closeDb()
-console.log('\ncard_mapping updated successfully.\n')
+console.log('\ncard_mapping and merchant_mapping updated successfully.\n')
