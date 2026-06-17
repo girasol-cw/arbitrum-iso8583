@@ -14,7 +14,7 @@ export function ConnectBar() {
   const [localRpc,  setLocalRpc]  = useState(rpcUrl)
   const [localCore, setLocalCore] = useState(coreAddress || DEPLOYED.proxy)
   const [localUsdc, setLocalUsdc] = useState(DEPLOYED.usdc)
-  const [localWeth, setLocalWeth] = useState(DEPLOYED.weth)
+  const [localUsdt, setLocalUsdt] = useState(DEPLOYED.usdt)
   const [loading,   setLoading]   = useState(false)
 
   const handleConnect = async () => {
@@ -22,7 +22,7 @@ export function ConnectBar() {
     setLoading(true)
     const tokens: Address[] = []
     if (isAddress(localUsdc)) tokens.push(localUsdc)
-    if (isAddress(localWeth)) tokens.push(localWeth)
+    if (isAddress(localUsdt)) tokens.push(localUsdt)
     await connect(localRpc, localCore, tokens)
     setLoading(false)
   }
@@ -64,12 +64,12 @@ export function ConnectBar() {
         />
       </div>
 
-      {/* WETH */}
+      {/* USDT */}
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-slate-500">WETH</span>
+        <span className="text-[11px] text-slate-500">USDT</span>
         <input
-          value={localWeth}
-          onChange={e => setLocalWeth(e.target.value as Address)}
+          value={localUsdt}
+          onChange={e => setLocalUsdt(e.target.value as Address)}
           className="w-52 font-mono"
           placeholder="0x…"
         />

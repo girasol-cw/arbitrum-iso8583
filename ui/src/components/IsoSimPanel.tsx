@@ -19,6 +19,7 @@ import {
   buildHeartbeatMsg,
   randomStan,
   type IntakeResponse,
+  type IsoMessage,
 } from '../lib/backendApi'
 import { useAppStore } from '../store'
 
@@ -101,11 +102,11 @@ export function IsoSimPanel() {
 
   // Form state
   const [flow,        setFlow]        = useState<Flow>('authorize')
-  const [cardToken,   setCardToken]   = useState(CARD_TOKENS[0].value)
-  const [merchantRef, setMerchantRef] = useState(MERCHANTS[0].value)
-  const [terminalId,  setTerminalId]  = useState(TERMINALS[0])
-  const [amount,      setAmount]      = useState('25.00')
-  const [currency,    setCurrency]    = useState('840')
+  const [cardToken,   setCardToken]   = useState<string>(CARD_TOKENS[0].value)
+  const [merchantRef, setMerchantRef] = useState<string>(MERCHANTS[0].value)
+  const [terminalId,  setTerminalId]  = useState<string>(TERMINALS[0])
+  const [amount,      setAmount]      = useState<string>('25.00')
+  const [currency,    setCurrency]    = useState<string>('840')
   const [origStan,    setOrigStan]    = useState('')
 
   // Submission state
@@ -119,7 +120,7 @@ export function IsoSimPanel() {
     setReqStatus('pending')
     const t0 = performance.now()
 
-    let msg: ReturnType<typeof buildAuthorizeMsg>
+    let msg: IsoMessage
     const opts = { cardToken, merchantRef, terminalId, amount, currency }
 
     switch (flow) {
@@ -166,8 +167,7 @@ export function IsoSimPanel() {
         addLog('error', `[ISO] ${flow} → ${resp.status} | rc:${resp.isoResponseCode} | ${resp.message ?? ''}`)
       }
 
-      setHistory(h => [
-        {
+      const entry: RequestEntry = {
           id:       ++entryId,
           ts:       new Date().toLocaleTimeString(),
           flow,
@@ -175,7 +175,10 @@ export function IsoSimPanel() {
           response: resp,
           error:    null,
           ms,
-        },
+        }
+
+      setHistory(h => [
+        entry,
         ...h,
       ].slice(0, 50))
     } catch (err) {
@@ -205,12 +208,22 @@ export function IsoSimPanel() {
     setReqStatus('pending')
     const t0 = performance.now()
     try {
-      const resp = await backendApi.intake(buildHeartbeatMsg())
+      const request = buildHeartbeatMsg()
+      const resp = await backendApi.intake(request)
       const ms = Math.round(performance.now() - t0)
       setReqStatus('ok')
       addLog('ok', `[ISO] heartbeat → ${resp.status} (${ms}ms)`)
+      const entry: RequestEntry = {
+        id: ++entryId,
+        ts: new Date().toLocaleTimeString(),
+        flow: 'heartbeat',
+        request,
+        response: resp,
+        error: null,
+        ms,
+      }
       setHistory(h => [
-        { id: ++entryId, ts: new Date().toLocaleTimeString(), flow: 'heartbeat', request: buildHeartbeatMsg(), response: resp, error: null, ms },
+        entry,
         ...h,
       ].slice(0, 50))
     } catch (err) {
