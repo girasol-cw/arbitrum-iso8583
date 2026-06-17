@@ -33,16 +33,20 @@ export interface ClassifiedError {
 }
 
 // ── Known Solidity 4-byte error selectors ─────────────────────────────────────
-// Run: cast sig "InsufficientAvailableBalance(uint256,uint256)"
+// Verificados con: node -e "const {keccak256,toBytes}=require('viem'); console.log(keccak256(toBytes('<sig>')).slice(0,10))"
 const SELECTOR_MAP: Record<string, ErrorCode> = {
-  '0x9e87fac8': 'INSUFFICIENT_FUNDS',          // InsufficientAvailableBalance
-  '0x6c6f1c2f': 'DUPLICATE_AUTHORIZATION',     // TxIdAlreadyUsed
-  '0xd0f47de3': 'INVALID_CAPTURE',             // InvalidHoldStatus
-  '0x3c9e43f4': 'EXPIRED_HOLD',               // HoldExpired
-  '0x4b137ea5': 'HOLD_NOT_EXPIRED',            // HoldNotExpired
-  '0x6c30a43e': 'HOLD_NOT_FOUND',              // HoldNotFound
-  '0x12f70b3d': 'TOKEN_NOT_ALLOWED',           // TokenNotAllowed
-  '0xd93c0665': 'UNKNOWN_CONTRACT_REVERT',     // FeeOnTransferToken (mis-configured token)
+  '0xadb9e043': 'INSUFFICIENT_FUNDS',          // InsufficientAvailableBalance(uint256,uint256)
+  '0xf4e6a85a': 'DUPLICATE_AUTHORIZATION',     // TxIdAlreadyUsed(bytes32)
+  '0x076675a9': 'INVALID_CAPTURE',             // InvalidHoldStatus(bytes32,uint8)
+  '0x2e27244b': 'EXPIRED_HOLD',               // HoldExpired(bytes32,uint256)
+  '0xc6cef671': 'HOLD_NOT_EXPIRED',            // HoldNotExpired(bytes32,uint256)
+  '0xe3882155': 'HOLD_NOT_FOUND',              // HoldNotFound(bytes32)
+  '0x94403b70': 'TOKEN_NOT_ALLOWED',           // TokenNotAllowed(address)
+  '0x825ab413': 'UNKNOWN_CONTRACT_REVERT',     // FeeOnTransferToken(address,uint256,uint256)
+  '0xd92e233d': 'UNKNOWN_CONTRACT_REVERT',     // ZeroAddress()
+  '0x1f2a2005': 'UNKNOWN_CONTRACT_REVERT',     // ZeroAmount()
+  '0x9eda8fcc': 'UNKNOWN_CONTRACT_REVERT',     // ExpiresAtInPast(uint256,uint256)
+  '0xbb1cb70b': 'UNKNOWN_CONTRACT_REVERT',     // BatchTooLarge(uint256,uint256)
 }
 
 // ── ISO 8583 response code mapping ───────────────────────────────────────────

@@ -12,8 +12,8 @@ import {
 
 const SAMPLE_TX_ID = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
 
-function createSample(txId = SAMPLE_TX_ID) {
-  createPaymentLog({
+async function createSample(txId = SAMPLE_TX_ID) {
+  await createPaymentLog({
     txId,
     mti: '0100',
     stan: '123456',
@@ -32,43 +32,43 @@ function createSample(txId = SAMPLE_TX_ID) {
 }
 
 describe('createPaymentLog', () => {
-  it('inserts a record successfully', () => {
-    createSample()
-    const row = getPaymentLog(SAMPLE_TX_ID)
+  it('inserts a record successfully', async () => {
+    await createSample()
+    const row = await getPaymentLog(SAMPLE_TX_ID)
     expect(row).not.toBeNull()
     expect(row!.tx_id).toBe(SAMPLE_TX_ID)
     expect(row!.status).toBe('pending')
     expect(row!.action).toBe('authorize')
   })
 
-  it('throws on duplicate txId', () => {
-    createSample()
-    expect(() => createSample()).toThrow()
+  it('throws on duplicate txId', async () => {
+    await createSample()
+    await expect(createSample()).rejects.toThrow()
   })
 })
 
 describe('isDuplicate', () => {
-  it('returns false when no record exists', () => {
-    expect(isDuplicate(SAMPLE_TX_ID)).toBe(false)
+  it('returns false when no record exists', async () => {
+    expect(await isDuplicate(SAMPLE_TX_ID)).toBe(false)
   })
 
-  it('returns true after insert', () => {
-    createSample()
-    expect(isDuplicate(SAMPLE_TX_ID)).toBe(true)
+  it('returns true after insert', async () => {
+    await createSample()
+    expect(await isDuplicate(SAMPLE_TX_ID)).toBe(true)
   })
 })
 
 describe('updatePaymentStatus', () => {
-  it('updates status and extra fields', () => {
-    createSample()
-    updatePaymentStatus(SAMPLE_TX_ID, 'confirmed', {
+  it('updates status and extra fields', async () => {
+    await createSample()
+    await updatePaymentStatus(SAMPLE_TX_ID, 'confirmed', {
       tx_hash: '0xtxhash',
       block_number: 42,
       onchain_status: 'authorized',
       retry_count: 1,
       last_error: 'NONCE_CONFLICT:retryable',
     })
-    const row = getPaymentLog(SAMPLE_TX_ID)!
+    const row = (await getPaymentLog(SAMPLE_TX_ID))!
     expect(row.status).toBe('confirmed')
     expect(row.tx_hash).toBe('0xtxhash')
     expect(row.block_number).toBe(42)
@@ -79,19 +79,19 @@ describe('updatePaymentStatus', () => {
 })
 
 describe('listPaymentLogs', () => {
-  it('returns records ordered by created_at desc', () => {
-    createSample('0x0001' + '0'.repeat(60))
-    createSample('0x0002' + '0'.repeat(60))
-    const rows = listPaymentLogs(10, 0)
+  it('returns records ordered by created_at desc', async () => {
+    await createSample('0x0001' + '0'.repeat(60))
+    await createSample('0x0002' + '0'.repeat(60))
+    const rows = await listPaymentLogs(10, 0)
     expect(rows.length).toBe(2)
   })
 
-  it('respects limit and offset', () => {
+  it('respects limit and offset', async () => {
     for (let i = 0; i < 5; i++) {
-      createSample(`0x${i.toString().padStart(64, '0')}`)
+      await createSample(`0x${i.toString().padStart(64, '0')}`)
     }
-    expect(listPaymentLogs(2, 0).length).toBe(2)
-    expect(listPaymentLogs(2, 4).length).toBe(1)
+    expect((await listPaymentLogs(2, 0)).length).toBe(2)
+    expect((await listPaymentLogs(2, 4)).length).toBe(1)
   })
 })
 

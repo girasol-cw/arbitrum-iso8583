@@ -7,6 +7,7 @@
 import express from 'express'
 import { config } from './config.js'
 import { getDb, runMigrations, closeDb } from './db/client.js'
+import { seedMappings } from './db/mappings.js'
 import { router } from './routes/api.js'
 import { logger } from './observability/logger.js'
 import { syncNonce, relayerAddress } from './relayer/wallet.js'
@@ -16,7 +17,7 @@ import { attachPosSimBridge } from './tcp/posSimBridge.js'
 async function bootstrap() {
   // ── 1. Database ────────────────────────────────────────────────────────────
   await runMigrations()
-
+  await seedMappings()
   // ── 2. Relayer nonce ───────────────────────────────────────────────────────
   if (config.NODE_ENV !== 'test') {
     await syncNonce()

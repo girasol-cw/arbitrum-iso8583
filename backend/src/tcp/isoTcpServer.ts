@@ -131,15 +131,18 @@ function handleConnection(socket: net.Socket): void {
 /**
  * Create and bind the ISO 8583 TCP server.
  * Returns the net.Server instance so the caller can close it on shutdown.
+ *
+ * @param listenPort - Optional port override. Defaults to config.TCP_PORT.
+ *   Pass 0 to let the OS assign a free port (useful in tests).
  */
-export function createIsoTcpServer(): net.Server {
+export function createIsoTcpServer(listenPort?: number): net.Server {
   const server = net.createServer({ allowHalfOpen: false }, handleConnection)
 
   server.on('error', (err) => {
     logger.error({ err }, 'ISO TCP server error')
   })
 
-  const port = config.TCP_PORT
+  const port = listenPort ?? config.TCP_PORT
   server.listen(port, () => {
     logger.info({ port }, 'ISO 8583 TCP server listening')
   })

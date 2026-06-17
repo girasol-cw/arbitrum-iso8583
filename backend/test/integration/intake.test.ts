@@ -18,11 +18,8 @@ jest.unstable_mockModule('../../src/relayer/responseHandler', () => ({
 }))
 
 jest.unstable_mockModule('../../src/mapping/normalizer', () => ({
-  normalize:              mockNormalizeFn,
-  resolveUserAddress:     jest.fn(),
-  resolveMerchantAddress: jest.fn(),
-  resolveTokenAddress:    jest.fn(),
-  _resetMaps:             jest.fn(),
+  normalize:           mockNormalizeFn,
+  resolveTokenAddress: jest.fn(),
 }))
 
 const { processIsoMessage } = await import('../../src/routes/intake')
@@ -46,7 +43,7 @@ const MOCK_PAYMENT = {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockNormalizeFn.mockReturnValue(MOCK_PAYMENT)
+  mockNormalizeFn.mockResolvedValue(MOCK_PAYMENT)
   mockSubmitFn.mockResolvedValue({ success: true, txHash: '0xtxhash' })
   mockReceiptFn.mockResolvedValue({ outcome: 'authorized', isoResponseCode: '00', txHash: '0xtxhash', blockNumber: 100 })
 })
@@ -58,7 +55,7 @@ describe('processIsoMessage – authorize (0100)', () => {
     expect(result.isoResponseCode).toBe('00')
     expect(result.action).toBe('authorize')
     expect(result.txHash).toBe('0xtxhash')
-    const log = getPaymentLog(result.txId)
+    const log = await getPaymentLog(result.txId)
     expect(log).not.toBeNull()
     expect(['submitted', 'confirmed']).toContain(log.status)
   })
@@ -101,7 +98,7 @@ describe('processIsoMessage – submission failure', () => {
       retryable: true,
     })
     const result = await processIsoMessage(GOOD_MSG)
-    const log = getPaymentLog(result.txId)!
+    const log = (await getPaymentLog(result.txId))!
 
     expect(result.status).toBe('declined')
     expect(log.retry_count).toBe(1)

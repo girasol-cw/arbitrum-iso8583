@@ -34,13 +34,15 @@ import {
 } from '../lib/posCodec'
 import { useAppStore } from '../store'
 
-// ── Pre-configured card tokens and merchants (from backend data files) ────────
+// ── Pre-configured card tokens y merchants (wallets derivadas del test mnemonic) ──
+// Mnemonic: bamboo scout soldier devote tooth ugly foot drive lamp upset arrange grape
+// Fondear con: cd contracts && forge script script/FundUsers.s.sol --rpc-url arbitrum-sepolia --private-key $DEPLOYER_PK --broadcast
 
 const CARD_TOKENS = [
-  { label: 'CARD_TOKEN_001',   value: 'CARD_TOKEN_001' },
-  { label: '4111111111111111', value: '4111111111111111' },
-  { label: 'TOK_ALICE_001',    value: 'TOK_ALICE_001' },
-  { label: 'TOK_BOB_001',      value: 'TOK_BOB_001' },
+  { label: 'TOK_TEST_001  (0x5f72…b562)', value: 'TOK_TEST_001' },
+  { label: 'TOK_TEST_002  (0xC480…C94)',  value: 'TOK_TEST_002' },
+  { label: 'TOK_TEST_003  (0x9b96…280d)', value: 'TOK_TEST_003' },
+  { label: 'TOK_TEST_004  (0x8222…5DB3)', value: 'TOK_TEST_004' },
 ]
 
 const MERCHANTS = [
@@ -185,6 +187,13 @@ export function PosTerminalPanel() {
         const rrn         = msg.fields['037'] ?? ''
         const description = rcLabel(rc)
 
+        // Auto-save the STAN from any approved response so capture/reversal
+        // can chain off it without manual input.
+        if (approved && stan) {
+          setLastStan(stan)
+          setOrigStan(stan)
+        }
+
         pushLine(mkLine(
           '◀ recv',
           approved ? 'text-green-400' : 'text-red-400',
@@ -203,6 +212,13 @@ export function PosTerminalPanel() {
   const disconnect = useCallback(() => {
     wsRef.current?.close()
   }, [])
+
+  // Auto-fill origStan when switching to a flow that requires it
+  useEffect(() => {
+    if ((flow === 'capture' || flow === 'reversal') && lastStan && !origStan) {
+      setOrigStan(lastStan)
+    }
+  }, [flow])
 
   // ── Send a transaction ─────────────────────────────────────────────────────
 
@@ -281,22 +297,28 @@ export function PosTerminalPanel() {
   return (
     <div className="space-y-4">
 
-      {/* ── Testing disclaimer ──────────────────────────────────────────── */}
-      <div className="rounded border border-amber-700/40 bg-amber-950/30 px-4 py-3 text-[11px] text-amber-300 space-y-1">
-        <p className="font-semibold">⚠  DEVELOPMENT / TESTING ONLY</p>
+      {/* ── Disclaimer ──────────────────────────────────────────────────── */}
+      <div className="rounded border border-amber-700/40 bg-amber-950/30 px-4 py-3 text-[11px] text-amber-300 space-y-2">
+        <p className="font-semibold text-amber-200 text-xs">⚠  POS TERMINAL — Transport: Binary ISO 8583 over TCP (DEVELOPMENT ONLY)</p>
         <p>
-          This panel emulates a physical POS terminal in the browser.
-          It sends real binary ISO 8583 frames over a WebSocket bridge
-          (<code className="font-mono bg-amber-900/30 px-1 rounded">/ws/pos</code>) that
-          connects internally to the TCP server on port 5000 — the exact same
-          entry-point a real POS device uses.  The full path is:
+          This panel emulates a <strong>physical point-of-sale terminal</strong> inside the browser.
+          Unlike the ISO Sim (which sends JSON over HTTP), here every message is
+          <strong> encoded as real binary</strong> per the ISO 8583 spec:
+          2-byte length prefix + 8-byte bitmap + fixed/variable-length fields.
+          That binary travels over WebSocket to an internal bridge that forwards it via TCP
+          to port{' '}
+          <code className="font-mono bg-amber-900/30 px-1 rounded">5000</code>{' '}
+          — the same entry-point a real card reader would use in production.
         </p>
-        <p className="font-mono text-amber-200 text-[10px] mt-1">
-          Browser → WebSocket /ws/pos → posSimBridge → TCP:5000 → isoTcpServer → contract on-chain
+        <p className="font-mono text-amber-200 text-[10px]">
+          Browser → WebSocket /ws/pos → posSimBridge → TCP:5000 → isoTcpServer → intake.ts → contract on-chain
         </p>
-        <p>
-          In production, replace this panel with a real POS terminal connected
-          directly to TCP:5000.  The server-side code does not change.
+        <p className="text-amber-400/80">
+          <strong>What it tests:</strong> the binary codec (<code className="font-mono bg-amber-900/30 px-1 rounded">posCodec.ts</code>),
+          TCP framing (<code className="font-mono bg-amber-900/30 px-1 rounded">framing.ts</code>),
+          the WebSocket↔TCP bridge, and the full end-to-end integration.
+          In production, replace this panel with a real terminal connected directly to TCP:5000
+          — the server-side code does not change.
         </p>
       </div>
 
@@ -341,23 +363,19 @@ export function PosTerminalPanel() {
           {/* Flow type */}
           <div>
             <label className="label">ISO 8583 Message Type</label>
-            <div className="flex flex-col gap-1.5 mt-1">
+            <div className="flex flex-wrap gap-2 mt-1">
               {(Object.keys(FLOW_LABELS) as Flow[]).map(f => (
-                <label key={f} className="flex items-center gap-2 cursor-pointer group">
-                  <input
-                    type="radio"
-                    name="pos-flow"
-                    value={f}
-                    checked={flow === f}
-                    onChange={() => setFlow(f)}
-                    className="accent-indigo-500"
-                  />
-                  <span className={`text-[11px] font-mono transition-colors ${
-                    flow === f ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300'
-                  }`}>
-                    {FLOW_LABELS[f]}
-                  </span>
-                </label>
+                <button
+                  key={f}
+                  onClick={() => setFlow(f)}
+                  className={`px-3 py-1.5 rounded border text-[11px] font-mono transition-all ${
+                    flow === f
+                      ? 'bg-indigo-900/60 border-indigo-600 text-indigo-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                  }`}
+                >
+                  {FLOW_LABELS[f]}
+                </button>
               ))}
             </div>
           </div>

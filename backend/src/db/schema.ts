@@ -6,7 +6,7 @@
  * CREATE_TABLES_SQL is still used at startup via runMigrations() to avoid
  * requiring drizzle-kit CLI in production.
  */
-import { pgTable, serial, text, integer } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, integer, boolean } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 // ── payment_log ───────────────────────────────────────────────────────────────
@@ -49,6 +49,30 @@ export const reconciliationRun = pgTable('reconciliation_run', {
   mismatches:    integer('mismatches').notNull(),
   report:        text('report').notNull(),
   created_at:    integer('created_at').notNull().default(sql`extract(epoch from now())::integer`),
+})
+
+// ── card_mapping ──────────────────────────────────────────────────────────────
+
+export const cardMapping = pgTable('card_mapping', {
+  id:          serial('id').primaryKey(),
+  card_token:  text('card_token').notNull().unique(),
+  eth_address: text('eth_address').notNull(),
+  label:       text('label'),
+  active:      boolean('active').notNull().default(true),
+  created_at:  integer('created_at').notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at:  integer('updated_at').notNull().default(sql`extract(epoch from now())::integer`),
+})
+
+// ── merchant_mapping ──────────────────────────────────────────────────────────
+
+export const merchantMapping = pgTable('merchant_mapping', {
+  id:           serial('id').primaryKey(),
+  merchant_ref: text('merchant_ref').notNull().unique(),
+  eth_address:  text('eth_address').notNull(),
+  label:        text('label'),
+  active:       boolean('active').notNull().default(true),
+  created_at:   integer('created_at').notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at:   integer('updated_at').notNull().default(sql`extract(epoch from now())::integer`),
 })
 
 // ── Bootstrap DDL ─────────────────────────────────────────────────────────────
@@ -98,4 +122,27 @@ CREATE INDEX IF NOT EXISTS idx_payment_log_rrn     ON payment_log(rrn);
 CREATE INDEX IF NOT EXISTS idx_payment_log_stan    ON payment_log(stan);
 CREATE INDEX IF NOT EXISTS idx_payment_log_status  ON payment_log(status);
 CREATE INDEX IF NOT EXISTS idx_payment_log_created ON payment_log(created_at);
+
+CREATE TABLE IF NOT EXISTS card_mapping (
+  id          SERIAL  PRIMARY KEY,
+  card_token  TEXT    NOT NULL UNIQUE,
+  eth_address TEXT    NOT NULL,
+  label       TEXT,
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
+  updated_at  INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS merchant_mapping (
+  id           SERIAL  PRIMARY KEY,
+  merchant_ref TEXT    NOT NULL UNIQUE,
+  eth_address  TEXT    NOT NULL,
+  label        TEXT,
+  active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at   INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
+  updated_at   INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_mapping_token    ON card_mapping(card_token);
+CREATE INDEX IF NOT EXISTS idx_merchant_mapping_ref  ON merchant_mapping(merchant_ref);
 `

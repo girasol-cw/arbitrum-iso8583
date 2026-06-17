@@ -55,4 +55,6 @@ export async function _resetDbForTests(): Promise<void> {
   // Delete in dependency order (no FK constraints, but explicit is safer)
   await db.delete(schema.reconciliationRun)
   await db.delete(schema.paymentLog)
+  await db.delete(schema.cardMapping)
+  await db.delete(schema.merchantMapping)
 }

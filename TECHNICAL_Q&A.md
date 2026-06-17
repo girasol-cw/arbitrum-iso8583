@@ -1,137 +1,137 @@
 # Technical Q&A — Arbitrum Settlement Core PoC
 
-> Fecha: 2026-06-09  
-> Versión: PoC v1
+> Date: 2026-06-09
+> Version: PoC v1
 
 ---
 
 ## Smart Contracts
 
-### ¿El modelo de balance separa explícitamente available y locked, o se deriva implícitamente?
+### Does the balance model separate available and locked explicitly, or is it derived implicitly?
 
-Explícitamente. El contrato mantiene dos mappings separados:
+Explicitly. The contract maintains two separate mappings:
 
 ```solidity
 mapping(address => uint256) public availableBalance;
 mapping(address => uint256) public lockedBalance;
 ```
 
-`availableBalance` es lo que el usuario puede gastar. `lockedBalance` es la suma de todos los holds activos. El balance total es `available + locked`.
+`availableBalance` is what the user can spend. `lockedBalance` is the sum of all active holds. Total balance is `available + locked`.
 
 ---
 
-### ¿Cómo garantizas que un capture no se ejecute más de una vez para el mismo txId?
+### How do you guarantee a capture is not executed more than once for the same txId?
 
-El contrato usa un enum de estado por txId:
+The contract uses a per-txId state enum:
 
 ```solidity
 enum AuthStatus { None, Authorized, Captured, Released, Expired }
 mapping(bytes32 => AuthStatus) public authStatus;
 ```
 
-`capture(txId)` tiene el guard:
+`capture(txId)` has the guard:
 
 ```solidity
 require(authStatus[txId] == AuthStatus.Authorized, "not authorized");
 authStatus[txId] = AuthStatus.Captured;
 ```
 
-La transición es atómica en EVM. Un segundo `capture` con el mismo `txId` revertirá con `"not authorized"` porque el estado ya es `Captured`.
+The transition is atomic in EVM. A second `capture` with the same `txId` will revert with `"not authorized"` because the state is already `Captured`.
 
 ---
 
-### ¿El txId es globalmente único, o solo único por user/account?
+### Is txId globally unique, or only unique per user/account?
 
-**Globalmente único**. Se deriva como:
+**Globally unique**. It is derived as:
 
 ```ts
 keccak256(encodePacked(stan, rrn, merchantRef, terminalId, localDate))
 ```
 
-Los campos ISO `STAN + RRN + merchantRef + terminalId + localDate` identifican unívocamente una transacción en la red de pagos. El hash resultante es el key del mapping global `authStatus`.
+The ISO fields `STAN + RRN + merchantRef + terminalId + localDate` uniquely identify a transaction in the payment network. The resulting hash is the key in the global `authStatus` mapping.
 
 ---
 
-### ¿Los holds de autorización expiran automáticamente, o solo se liberan manualmente?
+### Do authorization holds expire automatically, or are they only released manually?
 
-En la implementación actual del PoC: **solo manualmente** vía `release(txId)`. No hay un mecanismo onchain de expiración automática porque EVM no tiene scheduler nativo.
+In the current PoC implementation: **manually only** via `release(txId)`. There is no onchain automatic expiry mechanism because EVM has no native scheduler.
 
-El middleware es responsable de llamar `release` cuando detecta que un hold ha superado el `holdExpirySeconds` configurado. El reconciliador detecta holds vencidos y los reporta.
+The middleware is responsible for calling `release` when it detects a hold has exceeded the configured `holdExpirySeconds`. The reconciler detects expired holds and reports them.
 
-> **Limitación conocida**: si el middleware falla, los fondos quedan bloqueados hasta intervención manual o hasta que el reconciliador dispare la release.
+> **Known limitation**: if the middleware fails, funds remain locked until manual intervention or until the reconciler triggers the release.
 
 ---
 
-### ¿Qué pasa si un capture llega después de que el hold expiró?
+### What happens if a capture arrives after the hold has expired?
 
-Depende de si el contrato ya ejecutó la release:
+Depends on whether the contract has already executed the release:
 
-| Estado del hold | Resultado del capture |
+| Hold state | Capture result |
 |---|---|
-| `Authorized` (aún no expirado) | Captura exitosa |
-| `Released` (expirado y liberado) | Revert: `"not authorized"` |
-| `None` (nunca existió) | Revert: `"not authorized"` |
+| `Authorized` (not yet expired) | Successful capture |
+| `Released` (expired and released) | Revert: `"not authorized"` |
+| `None` (never existed) | Revert: `"not authorized"` |
 
-El middleware clasifica el revert como `EXPIRED_HOLD` y devuelve ISO response code `'61'`.
+The middleware classifies the revert as `EXPIRED_HOLD` and returns ISO response code `'61'`.
 
 ---
 
-### ¿Los decimales de token (USDC vs USDT) se manejan explícitamente?
+### Are token decimals (USDC vs USDT) handled explicitly?
 
-El contrato opera en **unidades base del token**. El middleware es responsable de la conversión:
+The contract operates in **base token units**. The middleware is responsible for the conversion:
 
 ```ts
 // parser.ts
 const amountDecimal = (parseInt(f('004')) / 100).toFixed(2)
-const amountOnchain = parseUnits(amountDecimal, tokenDecimals) // 6 para USDC/USDT
+const amountOnchain = parseUnits(amountDecimal, tokenDecimals) // 6 for USDC/USDT
 ```
 
-El PoC asume un único token de liquidación configurado en `SETTLEMENT_TOKEN_ADDRESS`. Si se necesitara multi-token, el contrato requeriría un mapping `tokenAddress → balances`.
+The PoC assumes a single settlement token configured in `SETTLEMENT_TOKEN_ADDRESS`. Multi-token support would require a `tokenAddress -> balances` mapping in the contract.
 
 ---
 
-### ¿Puede un usuario tener múltiples autorizaciones concurrentes?
+### Can a user have multiple concurrent authorizations?
 
-Sí. El contrato no limita el número de holds activos por usuario. Cada `txId` es independiente. El balance disponible se reduce con cada `authorize`:
+Yes. The contract does not limit the number of active holds per user. Each `txId` is independent. The available balance is reduced with each `authorize`:
 
 ```solidity
 availableBalance[user] -= amount;
 lockedBalance[user] += amount;
 ```
 
-Siempre que `availableBalance[user] >= amount`, la autorización procede.
+As long as `availableBalance[user] >= amount`, the authorization proceeds.
 
 ---
 
-### ¿Se manejan explícitamente overflow/underflow y edge cases contables?
+### Are overflow/underflow and accounting edge cases handled explicitly?
 
-Sí. Solidity ≥ 0.8.x tiene overflow/underflow protection built-in (panic `0x11`). Adicionalmente el contrato tiene guards explícitos:
+Yes. Solidity >= 0.8.x has built-in overflow/underflow protection (panic `0x11`). Additionally the contract has explicit guards:
 
 ```solidity
 require(availableBalance[user] >= amount, "insufficient funds");
 require(lockedBalance[user] >= amount, "accounting error");
 ```
 
-El segundo guard protege contra inconsistencias de estado que no deberían ocurrir pero son defensivamente verificadas.
+The second guard protects against state inconsistencies that should not occur but are defensively checked.
 
 ---
 
 ## Middleware
 
-### ¿Qué subset exacto de ISO 8583 soporta este PoC?
+### What exact subset of ISO 8583 does this PoC support?
 
-**MTI soportados:**
+**Supported MTIs:**
 
-| MTI | Descripción |
+| MTI | Description |
 |---|---|
 | `0100` | Authorization Request |
 | `0200` | Financial/Capture Request |
-| `0110` | Authorization Response (salida) |
-| `0210` | Financial Response (salida) |
+| `0110` | Authorization Response (outbound) |
+| `0210` | Financial Response (outbound) |
 
-**Campos soportados:**
+**Supported fields:**
 
-| Campo | Nombre |
+| Field | Name |
 |---|---|
 | `002` | PAN / card token |
 | `003` | Processing code |
@@ -141,13 +141,13 @@ El segundo guard protege contra inconsistencias de estado que no deberían ocurr
 | `042` | Terminal ID / Merchant ID |
 | `043` | Merchant name |
 | `049` | Currency code |
-| `039` | Response code (solo en respuestas) |
+| `039` | Response code (responses only) |
 
-Todo lo demás devuelve response code `'12'` (invalid transaction).
+Everything else returns response code `'12'` (invalid transaction).
 
 ---
 
-### ¿Cómo se construye el txId determinista?
+### How is the deterministic txId built?
 
 ```ts
 // src/mapping/txId.ts
@@ -161,21 +161,21 @@ export function deriveTxId(fields: ParsedIsoFields): `0x${string}` {
 }
 ```
 
-`localDate` es el campo ISO `013` (MMDD). La combinación `STAN + RRN + merchantRef + terminalId + fecha` es suficientemente única en redes de pago reales para el PoC.
+`localDate` is ISO field `013` (MMDD). The combination `STAN + RRN + merchantRef + terminalId + date` is sufficiently unique in real payment networks for the PoC.
 
 ---
 
-### ¿Qué estrategia de idempotencia se usa?
+### What idempotency strategy is used?
 
-**Tres capas:**
+**Three layers:**
 
-1. **DB constraint**: columna `tx_id` con `UNIQUE` en `payment_log`. Un segundo insert con el mismo `tx_id` falla a nivel PostgreSQL antes de tocar la red.
-2. **Lookup previo**: `isDuplicate(txId)` consulta el log antes de cualquier operación. Si existe con estado `submitted` o `confirmed`, devuelve el resultado previo directamente.
-3. **Onchain**: el contrato mismo rechaza un segundo `authorize` o `capture` con el mismo `txId`.
+1. **DB constraint**: `tx_id` column with `UNIQUE` on `payment_log`. A second insert with the same `tx_id` fails at the PostgreSQL level before touching the network.
+2. **Prior lookup**: `isDuplicate(txId)` queries the log before any operation. If it exists with state `submitted` or `confirmed`, the previous result is returned directly.
+3. **Onchain**: the contract itself rejects a second `authorize` or `capture` with the same `txId`.
 
 ---
 
-### ¿Cómo se manejan los reintentos ante fallo de RPC o submission?
+### How are retries handled on RPC or submission failure?
 
 ```ts
 // src/relayer/submitter.ts
@@ -184,42 +184,42 @@ try {
 } catch (err) {
   if (isNonceConflict(err)) {
     await syncNonce()
-    hash = await walletClient.writeContract(...)  // un solo reintento
+    hash = await walletClient.writeContract(...)  // single retry
   } else {
-    throw err  // clasificado como RPC_FAILURE → ISO '96'
+    throw err  // classified as RPC_FAILURE -> ISO '96'
   }
 }
 ```
 
-La política actual es **un reintento** ante conflicto de nonce. Fallos de RPC permanentes se clasifican y se devuelve decline al POS. El reconciliador detecta transacciones en estado `pending` para reintento manual.
+The current policy is **one retry** on nonce conflict. Permanent RPC failures are classified and a decline is returned to the POS. The reconciler detects transactions in `pending` state for manual retry.
 
 ---
 
-### ¿Cómo se maneja entrega fuera de orden (capture antes de authorize)?
+### How is out-of-order delivery handled (capture before authorize)?
 
-El contrato rechazará el `capture` con `"not authorized"` (estado `None`). El middleware:
+The contract will reject the `capture` with `"not authorized"` (state `None`). The middleware:
 
-1. Clasifica el revert como `INVALID_CAPTURE`
-2. Persiste el intento en el log con estado `failed`
-3. Devuelve ISO response code `'25'` (unable to locate record)
+1. Classifies the revert as `INVALID_CAPTURE`
+2. Persists the attempt in the log with state `failed`
+3. Returns ISO response code `'25'` (unable to locate record)
 
-No hay cola de espera para reintentar el capture una vez llegue el authorize. En producción esto requeriría un mecanismo de retry con backoff.
+There is no waiting queue to retry the capture once the authorize arrives. In production this would require a retry mechanism with backoff.
 
 ---
 
-### ¿Cómo se correlaciona una autorización con su capture?
+### How is an authorization correlated with its capture?
 
-Por `txId`. El `txId` se deriva **de los mismos campos ISO** en ambos mensajes:
+By `txId`. The `txId` is derived from **the same ISO fields** in both messages:
 
 ```
 STAN + RRN + merchantRef + terminalId + localDate
 ```
 
-El sistema de pago que envía el `0200` debe incluir los mismos valores en esos campos que el `0100` original. Esto es el comportamiento estándar en redes ISO 8583.
+The payment system sending the `0200` must include the same values in those fields as the original `0100`. This is standard behavior in ISO 8583 networks.
 
 ---
 
-### ¿Qué pasa si la tx se submittea onchain pero el middleware no recibe confirmación?
+### What happens if the tx is submitted onchain but the middleware does not receive confirmation?
 
 ```ts
 // src/relayer/responseHandler.ts
@@ -229,17 +229,17 @@ const receipt = await publicClient.waitForTransactionReceipt({
 })
 ```
 
-Si el timeout expira:
+If the timeout expires:
 
-1. El estado en DB queda `submitted` (no `confirmed`)
-2. Se devuelve decline al POS (respuesta conservadora)
-3. El reconciliador detecta el `tx_hash` con estado `submitted` y verifica onchain si confirmó
+1. The state in DB remains `submitted` (not `confirmed`)
+2. A decline is returned to the POS (conservative response)
+3. The reconciler detects the `tx_hash` with state `submitted` and checks onchain whether it confirmed
 
 ---
 
-### ¿Los logs se persisten para reconciliación, o solo en memoria?
+### Are logs persisted for reconciliation, or only in memory?
 
-**Persisten en PostgreSQL**. Cada mensaje ISO procesado genera una fila en `payment_log` con:
+**Persisted in PostgreSQL**. Each processed ISO message generates a row in `payment_log` with:
 
 ```
 tx_id, mti, stan, rrn, merchant_ref, terminal_id,
@@ -248,193 +248,193 @@ revert_reason, iso_response_code, iso_raw (JSON),
 created_at, updated_at
 ```
 
-La conexión se configura vía `DATABASE_URL` (ej: `postgresql://user:pass@host:5432/middleware`).
+The connection is configured via `DATABASE_URL` (e.g. `postgresql://user:pass@host:5432/middleware`).
 
 ---
 
-## Latencia
+## Latency
 
-### ¿El target <200ms es tiempo de middleware o confirmación onchain?
+### Is the <200ms target middleware time or onchain confirmation time?
 
-**Tiempo de middleware** (procesamiento interno). La confirmación onchain en Arbitrum One toma entre 200ms y 2s dependiendo de congestión.
+**Middleware time** (internal processing). Onchain confirmation on Arbitrum One takes between 200ms and 2s depending on congestion.
 
 ```
-ISO message recibido
-    ↓ <50ms   parse + normalize + DB write + submit tx
-TX submitted (hash disponible)
-    ↓ <2s     waitForReceipt (Arbitrum)
-ISO response enviado al POS
+ISO message received
+    | <50ms   parse + normalize + DB write + submit tx
+TX submitted (hash available)
+    | <2s     waitForReceipt (Arbitrum)
+ISO response sent to POS
 ```
 
-El POS espera la respuesta completa, por lo que la latencia percibida incluye confirmación onchain.
+The POS waits for the full response, so the perceived latency includes onchain confirmation.
 
 ---
 
-### ¿La respuesta al POS se envía antes o después de submitear la tx?
+### Is the POS response sent before or after submitting the tx?
 
-**Después de recibir el recibo** (confirmación onchain). El flujo es síncrono deliberadamente para el PoC: no se aprueba al POS hasta tener certeza onchain.
+**After receiving the receipt** (onchain confirmation). The flow is deliberately synchronous for the PoC: the POS is not approved until onchain certainty is obtained.
 
-Esto sacrifica latencia por correctness. Un sistema de producción podría enviar aprobación optimista y reconciliar después.
-
----
-
-### ¿Hay pre-validación offchain o mecanismo de aprobación optimista?
-
-No en el PoC. Las únicas validaciones offchain son:
-
-1. Parsing del mensaje ISO (malformado → decline inmediato)
-2. Lookup de idempotencia en DB (duplicado → respuesta cacheada)
-3. Resolución de card token → address (no encontrado → decline)
-
-No hay verificación de saldo offchain antes de submitear. El contrato es el árbitro final.
+This trades latency for correctness. A production system could send an optimistic approval and reconcile afterwards.
 
 ---
 
-## Reconciliación
+### Is there offchain pre-validation or an optimistic approval mechanism?
 
-### ¿La reconciliación es solo batch (script) o también near real-time?
+Not in the PoC. The only offchain validations are:
 
-**Solo batch** en el PoC. El script `scripts/reconcile.ts` se ejecuta manualmente o vía cron:
+1. ISO message parsing (malformed -> immediate decline)
+2. Idempotency lookup in DB (duplicate -> cached response)
+3. Card token -> address resolution (not found -> decline)
+
+There is no offchain balance check before submitting. The contract is the final arbiter.
+
+---
+
+## Reconciliation
+
+### Is reconciliation only batch (script) or also near real-time?
+
+**Batch only** in the PoC. The `scripts/reconcile.ts` script is run manually or via cron:
 
 ```bash
 npx tsx scripts/reconcile.ts --from 2026-06-01 --to 2026-06-09
 ```
 
-Genera un reporte JSON en `data/reconciliation-<timestamp>.json` e inserta en la tabla `reconciliation_run`. Near real-time requeriría un event listener onchain que no está implementado.
+It generates a JSON report in `data/reconciliation-<timestamp>.json` and inserts into the `reconciliation_run` table. Near real-time would require an onchain event listener that is not implemented.
 
 ---
 
-### ¿Qué comportamiento se espera ante mismatch entre logs offchain y estado onchain?
+### What behavior is expected on mismatch between offchain logs and onchain state?
 
-| Tipo | Descripción | Acción sugerida |
+| Type | Description | Suggested action |
 |---|---|---|
-| `MISSING_ONCHAIN` | Log dice `confirmed` pero no hay evento onchain | Investigar hash, posible reorg |
-| `MISSING_OFFCHAIN` | Evento onchain sin log correspondiente | Posible pérdida de datos en middleware |
-| `STATUS_MISMATCH` | Estados diferentes entre DB y contrato | DB desactualizado, no fondos en riesgo |
-| `AMOUNT_MISMATCH` | Montos distintos | Crítico, requiere intervención manual |
+| `MISSING_ONCHAIN` | Log says `confirmed` but no onchain event found | Investigate hash, possible reorg |
+| `MISSING_OFFCHAIN` | Onchain event with no corresponding log | Possible data loss in middleware |
+| `STATUS_MISMATCH` | Different states between DB and contract | DB out of date, no funds at risk |
+| `AMOUNT_MISMATCH` | Different amounts | Critical, requires manual intervention |
 
-El script **no corrige automáticamente**. Solo reporta.
-
----
-
-### ¿Arbitrum es siempre la única fuente de verdad?
-
-**Sí, para el estado financiero**. Si hay conflicto entre el log PostgreSQL y el estado del contrato, el contrato gana.
-
-El log PostgreSQL es una caché operacional para velocidad y reconciliación. Nunca se usa para tomar decisiones de negocio sin validación onchain.
+The script **does not auto-correct**. It only reports.
 
 ---
 
-## Seguridad
+### Is Arbitrum always the single source of truth?
 
-### ¿Se realizó threat modeling formal, o solo revisión interna manual?
+**Yes, for financial state**. If there is a conflict between the PostgreSQL log and the contract state, the contract wins.
 
-Solo revisión interna manual para el PoC. No se aplicó ningún framework formal (STRIDE, PASTA, etc.). Las superficies de ataque identificadas están documentadas pero sin scoring de riesgo formal.
+The PostgreSQL log is an operational cache for speed and reconciliation. It is never used to make business decisions without onchain validation.
 
 ---
 
-### ¿Qué vectores de ataque se consideran explícitamente?
+## Security
 
-| Vector | Mitigación implementada |
+### Was formal threat modeling performed, or only manual internal review?
+
+Only manual internal review for the PoC. No formal framework (STRIDE, PASTA, etc.) was applied. Identified attack surfaces are documented but without formal risk scoring.
+
+---
+
+### What attack vectors are explicitly considered?
+
+| Vector | Implemented mitigation |
 |---|---|
-| **Replay de mensaje ISO** | `isDuplicate()` por `txId` + constraint UNIQUE en DB |
-| **Double spend** | `authStatus` enum en contrato, transición atómica EVM |
-| **Escalación de privilegios** | Solo el relayer wallet puede llamar `authorize`/`capture`; modifier `onlyRelayer` |
-| **Manipulación de amount** | Amount en ISO y calldata deben coincidir; el contrato valida saldo |
-| **Falsificación de txId** | `txId` derivado determinísticamente; un txId distinto crea una autorización distinta |
+| **ISO message replay** | `isDuplicate()` by `txId` + UNIQUE constraint in DB |
+| **Double spend** | `authStatus` enum in contract, atomic EVM transition |
+| **Privilege escalation** | Only the relayer wallet can call `authorize`/`capture`; `onlyRelayer` modifier |
+| **Amount manipulation** | Amount in ISO and calldata must match; contract validates balance |
+| **txId forgery** | `txId` derived deterministically; a different txId creates a different authorization |
 
 ---
 
-### Si el middleware es comprometido, ¿puede drenar o mal usar fondos?
+### If the middleware is compromised, can it drain or misuse funds?
 
-**Parcialmente sí**. Esta es la limitación más importante del PoC:
+**Partially yes**. This is the most important limitation of the PoC:
 
-- El relayer wallet tiene permiso para llamar `authorize` y `capture` por cualquier usuario
-- Un middleware comprometido podría capturar autorizaciones legítimas o crear autorizaciones fraudulentas
+- The relayer wallet has permission to call `authorize` and `capture` on behalf of any user
+- A compromised middleware could capture legitimate authorizations or create fraudulent ones
 
-**Mitigaciones en el PoC:**
-- El relayer solo puede operar sobre usuarios que previamente depositaron fondos
-- No puede transferir fondos fuera del contrato directamente
-- Los merchants solo reciben fondos vía `capture`, que requiere un `txId` previamente autorizado
+**Mitigations in the PoC:**
+- The relayer can only operate on users who have previously deposited funds
+- It cannot transfer funds out of the contract directly
+- Merchants only receive funds via `capture`, which requires a previously authorized `txId`
 
-> En producción esto requeriría firma del usuario por cada transacción o un sistema de delegación con límites.
-
----
-
-### ¿Hay límites de gasto por usuario o globales?
-
-**No en el PoC**. El único límite es el balance disponible del usuario (`availableBalance[user]`).
-
-No hay:
-- Límite diario por usuario
-- Límite por transacción
-- Límite global del contrato (circuit breaker)
-
-En producción estos son requisitos críticos de compliance.
+> In production this would require per-transaction user signatures or a delegation system with limits.
 
 ---
 
-## Scope del PoC
+### Are there per-user or global spending limits?
 
-### ¿Hay usuarios y merchants reales, o todo es simulado?
+**Not in the PoC**. The only limit is the user's available balance (`availableBalance[user]`).
 
-Todo simulado:
+There are no:
+- Daily per-user limits
+- Per-transaction limits
+- Global contract limits (circuit breaker)
 
-- **Usuarios**: addresses Ethereum con fondos pre-depositados vía scripts de setup
-- **Merchants**: addresses Ethereum configuradas en `data/merchants.json`
-- **Tarjetas**: tokens (PANs truncados) mapeados a addresses en `data/cards.json`
-- **POS**: script que envía mensajes ISO 8583 vía TCP al middleware
-
-No hay integración con ningún emisor, adquirente, o procesador de pagos real.
+In production these are critical compliance requirements.
 
 ---
 
-### ¿El lado merchant está completamente mockeado o parcialmente integrado?
+## PoC Scope
 
-**Completamente mockeado**. El merchant es una address Ethereum que recibe el settlement. No hay:
+### Are users and merchants real, or is everything simulated?
 
-- Sistema de gestión de merchants
-- KYC/onboarding de merchants
-- Dashboard de merchant
-- Webhook de notificación al merchant
+Everything simulated:
 
-El mapping `merchantRef (ISO field 042) → address Ethereum` está en un JSON estático.
+- **Users**: Ethereum addresses with pre-deposited funds via setup scripts
+- **Merchants**: Ethereum addresses configured in `data/merchants.json`
+- **Cards**: tokens (truncated PANs) mapped to addresses in `data/cards.json`
+- **POS**: script that sends ISO 8583 messages via TCP to the middleware
+
+There is no integration with any real issuer, acquirer, or payment processor.
 
 ---
 
-### ¿Cómo se demuestra la reproducibilidad del PoC?
+### Is the merchant side fully mocked or partially integrated?
+
+**Fully mocked**. The merchant is an Ethereum address that receives the settlement. There is no:
+
+- Merchant management system
+- Merchant KYC/onboarding
+- Merchant dashboard
+- Merchant notification webhook
+
+The mapping `merchantRef (ISO field 042) -> Ethereum address` is stored in a static JSON.
+
+---
+
+### How is PoC reproducibility demonstrated?
 
 ```bash
-# 1. Deploy contrato en Arbitrum Sepolia
+# 1. Deploy contract on Arbitrum Sepolia
 cd contracts && npx hardhat deploy --network arbitrumSepolia
 
-# 2. Setup: depositar fondos, registrar merchants
+# 2. Setup: deposit funds, register merchants
 npx tsx scripts/setup.ts
 
-# 3. Levantar middleware
+# 3. Start middleware
 cd backend && npm run start
 
-# 4. Ejecutar suite de tests de integración
+# 4. Run integration test suite
 npm run test:integration
 
-# 5. Simular POS (envía ISO messages reales vía TCP)
+# 5. Simulate POS (sends real ISO messages via TCP)
 npx tsx scripts/simulatePOS.ts
 
-# 6. Reconciliar
+# 6. Reconcile
 npx tsx scripts/reconcile.ts
 ```
 
-Todos los pasos son deterministas dado el mismo entorno.
+All steps are deterministic given the same environment.
 
 ---
 
-### ¿Qué métricas exactas se entregan como prueba de éxito?
+### What exact metrics are delivered as proof of success?
 
-| Métrica | Target | Cómo se mide |
+| Metric | Target | How measured |
 |---|---|---|
-| Latencia end-to-end (ISO in → ISO out) | < 3s (incluyendo Arbitrum) | `GET /metrics` → `iso_processing_duration_ms` |
-| Tasa de éxito de authorizations | > 95% en condiciones normales | `tx_confirmed / iso_messages_received` |
-| Tests de integración passing | 100% | `npm test` |
-| Cero discrepancias en reconciliación | 0 mismatches post-simulación | Output de `reconcile.ts` |
-| Idempotencia verificada | 0 double captures | Tests de duplicados en suite |
-| Throughput sostenido | > 10 TPS en simulación | `scripts/loadTest.ts` |
+| End-to-end latency (ISO in -> ISO out) | < 3s (including Arbitrum) | `GET /metrics` -> `iso_processing_duration_ms` |
+| Authorization success rate | > 95% under normal conditions | `tx_confirmed / iso_messages_received` |
+| Integration tests passing | 100% | `npm test` |
+| Zero reconciliation discrepancies | 0 mismatches post-simulation | Output of `reconcile.ts` |
+| Idempotency verified | 0 double captures | Duplicate tests in suite |
+| Sustained throughput | > 10 TPS in simulation | `scripts/loadTest.ts` |

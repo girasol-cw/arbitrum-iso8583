@@ -229,12 +229,31 @@ export function IsoSimPanel() {
   return (
     <div className="space-y-4">
 
-      {/* ── Form card ──────────────────────────────────────────── */}
+      {/* ── Disclaimer ────────────────────────────────────────────── */}
+      <div className="rounded border border-sky-700/40 bg-sky-950/30 px-4 py-3 text-[11px] text-sky-300 space-y-2">
+        <p className="font-semibold text-sky-200 text-xs">ⓘ  ISO SIM — Transport: HTTP/JSON</p>
+        <p>
+          This panel sends ISO 8583 messages as <strong>JSON over HTTP</strong> directly
+          to the <code className="font-mono bg-sky-900/30 px-1 rounded">POST /iso/intake</code> endpoint.
+          There is no binary codec: fields travel as plain text and can be
+          easily inspected in the browser DevTools.
+        </p>
+        <p className="font-mono text-sky-200 text-[10px]">
+          Browser → HTTP POST /iso/intake → intake.ts → contract on-chain
+        </p>
+        <p className="text-sky-400/80">
+          <strong>What it tests:</strong> the middleware business logic (parsing, routing, deduplication,
+          contract call). It does <em>not</em> validate the binary TCP framing.
+          Use the <strong>POS Terminal</strong> tab to test the full binary stack.
+        </p>
+      </div>
+
+      {/* ── Form card ────────────────────────────────────────────── */}
       <div className="card">
         <div className="card-header">
           <span className="text-sm font-semibold text-white">ISO 8583 Simulator</span>
           <span className="ml-auto text-[11px] text-slate-500">
-            → backend middleware → contract on-chain
+            HTTP/JSON → backend middleware → contract on-chain
           </span>
         </div>
 

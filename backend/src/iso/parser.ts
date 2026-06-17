@@ -67,13 +67,15 @@ export function parseIsoMessage(input: unknown): ParsedIsoFields {
 
   const optional = (key: string): string => fields[key]?.trim() ?? ''
 
+  const isHeartbeat = mti === '0800'
+
   const stan           = require(F.STAN, 'STAN')
-  const rrn            = require(F.RETRIEVAL_REF, 'RRN')
-  const amountRaw      = require(F.AMOUNT_TRANSACTION, 'Amount')
-  const currencyNumeric = require(F.CURRENCY_CODE, 'Currency')
-  const cardToken      = require(F.PAN, 'PAN/Card token')
-  const terminalId     = require(F.CARD_ACCEPTOR_ID, 'Terminal ID')
-  const merchantRef    = require(F.CARD_ACCEPTOR_NAME, 'Merchant name/ID')
+  const rrn            = isHeartbeat ? optional(F.RETRIEVAL_REF) : require(F.RETRIEVAL_REF, 'RRN')
+  const amountRaw      = isHeartbeat ? '000000000000' : require(F.AMOUNT_TRANSACTION, 'Amount')
+  const currencyNumeric = isHeartbeat ? '840' : require(F.CURRENCY_CODE, 'Currency')
+  const cardToken      = isHeartbeat ? '' : require(F.PAN, 'PAN/Card token')
+  const terminalId     = isHeartbeat ? optional(F.CARD_ACCEPTOR_ID) : require(F.CARD_ACCEPTOR_ID, 'Terminal ID')
+  const merchantRef    = isHeartbeat ? optional(F.CARD_ACCEPTOR_NAME) : require(F.CARD_ACCEPTOR_NAME, 'Merchant name/ID')
   const transmissionDt = optional(F.TRANSMISSION_DT)
   const localDate      = optional(F.LOCAL_DATE)
   const localTime      = optional(F.LOCAL_TIME)

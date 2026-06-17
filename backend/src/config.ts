@@ -9,7 +9,7 @@ import 'dotenv/config'
 
 const ConfigSchema = z.object({
   PORT:     z.coerce.number().default(3100),
-  /** Puerto TCP para recibir mensajes ISO 8583 raw binarios */
+  /** TCP port for receiving raw binary ISO 8583 messages */
   TCP_PORT: z.coerce.number().default(5000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 

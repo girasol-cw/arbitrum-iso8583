@@ -218,9 +218,15 @@ export const backendApi = {
     return request<PaymentLogRow[]>(`/payments?limit=${limit}&offset=${offset}`)
   },
 
-  /** Get Prometheus-style metrics from the backend */
-  getMetrics(): Promise<BackendMetrics> {
-    return request<BackendMetrics>('/metrics')
+  /** Get metrics from the backend and normalize the flat response into BackendMetrics */
+  async getMetrics(): Promise<BackendMetrics> {
+    const raw = await request<Record<string, number>>('/metrics')
+    return {
+      isoMessagesReceived: { total: raw['iso_messages_received'] ?? 0 },
+      isoMessagesRouted:   { total: raw['iso_messages_routed']   ?? 0 },
+      isoDuplicates:       raw['iso_duplicates']    ?? 0,
+      errorsClassified:    { total: raw['error_classified']      ?? 0 },
+    }
   },
 
   /** Health check – resolves quickly if backend is up */

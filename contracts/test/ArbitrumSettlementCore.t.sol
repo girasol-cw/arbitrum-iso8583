@@ -386,7 +386,7 @@ contract ArbitrumSettlementCoreTest is Test {
         feeToken.approve(address(core), depositAmount);
         vm.expectRevert(
             abi.encodeWithSelector(
-                FeeOnTransferToken.selector,   // error del contrato
+                FeeOnTransferToken.selector,   // contract error
                 address(feeToken),
                 depositAmount,                 // expected
                 depositAmount - feeToken.FEE() // received (actually transferred to contract)

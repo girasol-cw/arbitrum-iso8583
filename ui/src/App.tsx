@@ -19,12 +19,12 @@ import { IsoSimPanel }          from './components/IsoSimPanel'
 import { BackendPaymentsPanel } from './components/BackendPaymentsPanel'
 import { PosTerminalPanel }     from './components/PosTerminalPanel'
 
-type Tab = 'dashboard' | 'pos-terminal' | 'iso-sim' | 'benchmark'
+type Tab = 'dashboard' | 'iso-sim' | 'pos-terminal' | 'benchmark'
 
 const TAB_LABELS: Record<Tab, string> = {
   'dashboard':    '⬡ Dashboard',
-  'pos-terminal': '⊡ POS Terminal',
   'iso-sim':      '⇄ ISO Sim',
+  'pos-terminal': '⊡ POS Terminal',
   'benchmark':    '📊 Benchmark',
 }
 
@@ -161,6 +161,17 @@ export default function App() {
 
         {tab === 'benchmark' && <BenchmarkPanel />}
 
+        {/* ── ISO Sim tab: JSON HTTP shortcut (no binary codec required) ─── */}
+        {tab === 'iso-sim' && (
+          <>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+              <IsoSimPanel />
+              <BackendPaymentsPanel />
+            </div>
+            <ActivityFeed />
+          </>
+        )}
+
         {/* ── POS Terminal tab: full wire-protocol emulation (DEV ONLY) ───── */}
         {tab === 'pos-terminal' && (
           <>
@@ -168,20 +179,6 @@ export default function App() {
               <PosTerminalPanel />
               <BackendPaymentsPanel />
             </div>
-            <ActivityFeed />
-          </>
-        )}
-
-        {/* ── ISO Sim tab: JSON HTTP shortcut (no binary codec required) ─── */}
-        {tab === 'iso-sim' && (
-          <>
-            {/* ISO sim + backend payments side by side on large screens */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-              <IsoSimPanel />
-              <BackendPaymentsPanel />
-            </div>
-
-            {/* Activity Feed so on-chain hashes are also visible here */}
             <ActivityFeed />
           </>
         )}

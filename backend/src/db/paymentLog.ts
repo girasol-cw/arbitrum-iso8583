@@ -4,7 +4,7 @@
  *
  * All operations are async (postgres-js driver returns Promises).
  */
-import { eq, desc, sql } from 'drizzle-orm'
+import { eq, desc, sql, and, inArray } from 'drizzle-orm'
 import { getDb } from './client.js'
 import { paymentLog } from './schema.js'
 
@@ -71,7 +71,7 @@ export async function getPaymentLog(txId: string): Promise<PaymentLogRow | null>
 export async function updatePaymentStatus(
   txId:   string,
   status: PaymentStatus,
-  extra?: Partial<Pick<PaymentLogRow, 'tx_hash' | 'block_number' | 'onchain_status' | 'revert_reason' | 'retry_count' | 'last_error' | 'error_code'>>,
+  extra?: Partial<Pick<PaymentLogRow, 'tx_hash' | 'block_number' | 'onchain_status' | 'revert_reason' | 'retry_count' | 'last_error' | 'error_code' | 'action'>>,
 ): Promise<void> {
   await getDb()
     .update(paymentLog)
@@ -85,6 +85,7 @@ export async function updatePaymentStatus(
       ...(extra?.retry_count    !== undefined && { retry_count:    extra.retry_count }),
       ...(extra?.last_error     !== undefined && { last_error:     extra.last_error }),
       ...(extra?.error_code     !== undefined && { error_code:     extra.error_code }),
+      ...(extra?.action         !== undefined && { action:         extra.action }),
     })
     .where(eq(paymentLog.tx_id, txId))
 }
@@ -101,4 +102,45 @@ export async function listPaymentLogs(limit = 100, offset = 0): Promise<PaymentL
 /** Return true if a record already exists for this txId (idempotency). */
 export async function isDuplicate(txId: string): Promise<boolean> {
   return (await getPaymentLog(txId)) !== null
+}
+
+/**
+ * Return true if a record already exists for this txId with the given action.
+ * Used for capture/release which intentionally share the txId with the
+ * original authorize — so we must check (txId + action), not just txId.
+ */
+export async function isDuplicateAction(txId: string, action: string): Promise<boolean> {
+  const rows = await getDb()
+    .select({ id: paymentLog.id })
+    .from(paymentLog)
+    .where(and(eq(paymentLog.tx_id, txId), eq(paymentLog.action, action)))
+    .limit(1)
+  return rows.length > 0
+}
+
+/**
+ * Look up an existing authorize/capture payment by the original STAN.
+ * Used by reversals to resolve the correct on-chain txId without relying on
+ * a matching RRN (reversal messages carry a new RRN, not the original one).
+ * Optionally scoped to a specific merchantRef + terminalId for safety.
+ */
+export async function getPaymentLogByStan(
+  stan:        string,
+  merchantRef: string,
+  terminalId:  string,
+): Promise<PaymentLogRow | null> {
+  const rows = await getDb()
+    .select()
+    .from(paymentLog)
+    .where(
+      and(
+        eq(paymentLog.stan,         stan),
+        eq(paymentLog.merchant_ref, merchantRef),
+        eq(paymentLog.terminal_id,  terminalId),
+        inArray(paymentLog.action,  ['authorize', 'authorize_and_capture']),
+      ),
+    )
+    .orderBy(desc(paymentLog.created_at))
+    .limit(1)
+  return rows[0] ?? null
 }
