@@ -304,13 +304,15 @@ It generates a JSON report in `data/reconciliation-<timestamp>.json` and inserts
 
 ---
 
-### What behavior is expected on mismatch between offchain logs and onchain state?
+### What behavior is expected on mismatch between middleware payment logs and onchain state?
+
+The reconciliation script compares the middleware's `payment_log` table against Arbitrum onchain events — not external banking-rail logs. No legacy-rail file or export is connected to the script in this PoC.
 
 | Type | Description | Suggested action |
 |---|---|---|
-| `MISSING_ONCHAIN` | Log says `confirmed` but no onchain event found | Investigate hash, possible reorg |
-| `MISSING_OFFCHAIN` | Onchain event with no corresponding log | Possible data loss in middleware |
-| `STATUS_MISMATCH` | Different states between DB and contract | DB out of date, no funds at risk |
+| `MISSING_ONCHAIN` | `payment_log` row is `confirmed` but no onchain event found | Investigate hash, possible reorg |
+| `MISSING_OFFCHAIN` | Onchain event with no corresponding `payment_log` row | Possible data loss in middleware |
+| `STATUS_MISMATCH` | Different states between `payment_log` and contract | DB out of date, no funds at risk |
 | `AMOUNT_MISMATCH` | Different amounts | Critical, requires manual intervention |
 
 The script **does not auto-correct**. It only reports.

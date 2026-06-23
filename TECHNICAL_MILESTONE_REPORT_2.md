@@ -47,8 +47,8 @@ POS Terminal / UI Simulator
 │    GET  /payments/:id  (single payment)                     │
 │    GET  /metrics       (in-memory counters)                 │
 │    GET  /health                                             │
-│    CRUD /mappings/cards                                     │
-│    CRUD /mappings/merchants                                 │
+│    GET/PUT/DELETE /admin/cards                              │
+│    GET/PUT/DELETE /admin/merchants                          │
 │                                                             │
 │  PostgreSQL (Drizzle ORM)                                   │
 │    payment_log        card_mapping    merchant_mapping      │
@@ -329,11 +329,11 @@ In-memory counters: `iso_messages_received`, `iso_messages_routed`, `iso_duplica
 ### `GET /health`
 Liveness probe. Returns `{ "status": "ok", "ts": "..." }`.
 
-### `GET /mappings/cards` / `POST /mappings/cards` / `DELETE /mappings/cards/:token`
-CRUD for `card_mapping` table.
+### `GET /admin/cards` / `PUT /admin/cards/:token` / `DELETE /admin/cards/:token`
+Manage `card_mapping` table entries. `PUT` upserts a card token → ETH address binding; `DELETE` soft-deactivates it.
 
-### `GET /mappings/merchants` / `POST /mappings/merchants` / `DELETE /mappings/merchants/:ref`
-CRUD for `merchant_mapping` table.
+### `GET /admin/merchants` / `PUT /admin/merchants/:ref` / `DELETE /admin/merchants/:ref`
+Manage `merchant_mapping` table entries. `PUT` upserts a merchant ref → ETH address binding; `DELETE` soft-deactivates it.
 
 ---
 
@@ -345,7 +345,7 @@ A browser-based POS terminal emulator in `ui/src/components/PosTerminalPanel.tsx
 Available flows: `0100 authorize`, `0200 capture`, `0200 single purchase`, `0400 reversal`, `0800 heartbeat`.
 
 ### Reconciliation Script
-`backend/scripts/reconcile.ts` — queries on-chain `PaymentAuthorized` / `PaymentCaptured` / `PaymentReleased` events and cross-references them against `payment_log`. Writes a JSON report and inserts a `reconciliation_run` row.
+`backend/scripts/reconcile.ts` — the validation script compares middleware payment logs (`payment_log` table) against Arbitrum onchain events (`PaymentAuthorized` / `PaymentCaptured` / `PaymentReleased`). Writes a JSON report and inserts a `reconciliation_run` row.
 
 ### Seed Script
 `backend/scripts/seed-card-mapping.ts` — upserts `contracts/script/output/funded-wallets.json` (produced by `FundUsersMint.s.sol`) into `card_mapping`. Falls back to `backend/src/config/testWallets.ts` if the JSON is absent.
